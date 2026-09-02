@@ -14,8 +14,8 @@ Compares [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) and [Tesseract](
 
 - 500 video clips across 50 identity document types (17 ID cards, 14 passports, 13 driving licences, 6 other).
 - Documents are mock IDs made for research (fictional people / consenting volunteers) — no real PII.
-- Each document type ships with per-frame ground-truth quadrangles (the 4 corner points of the document in each photo), which lets us crop/rectify the document before OCR. It does **not** ship ground-truth text for the fields — since each document type is one physical mock document filmed under 10 conditions, the notebook has you transcribe its field values once by eye, which then serves as ground truth for scoring.
-- Distributed as 50 small per-type zip files, so the notebook downloads only 4 of them (~a few hundred MB) instead of the full dataset — kept intentionally small for Colab.
+- Each document type ships with per-frame ground-truth quadrangles (the 4 corner points of the document in each photo, for cropping/rectifying it) and a ground-truth JSON of the actual text field values (name, document number, dates, etc.) — since all frames of a type show the same physical document, one template covers every frame. This is what the notebook scores OCR output against.
+- Distributed as 50 small per-type zip files, so the notebook downloads only 4 of them instead of the full dataset. Each zip still bundles the source videos the frames were extracted from (~500 MB-1 GB per type) — the notebook deletes them right after extracting, since only the frame images and ground truth are needed.
 
 Default document types used (all Latin-script, so a single PaddleOCR/Tesseract language model handles them all):
 
@@ -32,9 +32,8 @@ Swap `DOC_TYPES` in the notebook for any of the [other 46 codes](https://github.
 
 1. Download the selected MIDV-500 document types and sample a handful of frames per clip.
 2. Perspective-warp each frame using the ground-truth document quadrangle to get a straightened, cropped ID image.
-3. Transcribe the field text visible on one rectified frame per document type, once — this becomes the ground truth (`GT_FIELDS`), since MIDV-500 doesn't provide it.
-4. Run both OCR engines on the same crop.
-5. Score each engine two ways against `GT_FIELDS`:
+3. Run both OCR engines on the same crop.
+4. Score each engine two ways against the ground-truth field values:
    - **Field recall** — fraction of known field values (fuzzy-)found in the OCR output.
    - **Character error rate (CER)** — Levenshtein distance between OCR output and ground truth, normalized by length.
-6. Aggregate and plot per document type and overall.
+5. Aggregate and plot per document type and overall.
