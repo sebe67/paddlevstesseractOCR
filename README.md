@@ -14,7 +14,7 @@ Compares [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) and [Tesseract](
 
 - 500 video clips across 50 identity document types (17 ID cards, 14 passports, 13 driving licences, 6 other).
 - Documents are mock IDs made for research (fictional people / consenting volunteers) — no real PII.
-- Each document type ships with per-frame ground-truth quadrangles (for cropping/rectifying the document in a photo) and a ground-truth JSON of the actual text field values (name, document number, dates, etc.), which lets us score OCR accuracy directly instead of eyeballing it.
+- Each document type ships with per-frame ground-truth quadrangles (the 4 corner points of the document in each photo), which lets us crop/rectify the document before OCR. It does **not** ship ground-truth text for the fields — since each document type is one physical mock document filmed under 10 conditions, the notebook has you transcribe its field values once by eye, which then serves as ground truth for scoring.
 - Distributed as 50 small per-type zip files, so the notebook downloads only 4 of them (~a few hundred MB) instead of the full dataset — kept intentionally small for Colab.
 
 Default document types used (all Latin-script, so a single PaddleOCR/Tesseract language model handles them all):
@@ -32,8 +32,9 @@ Swap `DOC_TYPES` in the notebook for any of the [other 46 codes](https://github.
 
 1. Download the selected MIDV-500 document types and sample a handful of frames per clip.
 2. Perspective-warp each frame using the ground-truth document quadrangle to get a straightened, cropped ID image.
-3. Run both OCR engines on the same crop.
-4. Score each engine two ways against the ground-truth field values:
+3. Transcribe the field text visible on one rectified frame per document type, once — this becomes the ground truth (`GT_FIELDS`), since MIDV-500 doesn't provide it.
+4. Run both OCR engines on the same crop.
+5. Score each engine two ways against `GT_FIELDS`:
    - **Field recall** — fraction of known field values (fuzzy-)found in the OCR output.
    - **Character error rate (CER)** — Levenshtein distance between OCR output and ground truth, normalized by length.
-5. Aggregate and plot per document type and overall.
+6. Aggregate and plot per document type and overall.
