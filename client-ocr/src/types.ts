@@ -55,7 +55,10 @@ export interface DocumentProvenanceEntry {
   engine_version: string;
 }
 
-/** Matches the "ph id schema" JSON schema. */
+/**
+ * Mirrors ../schema/ph-id-schema.json field-for-field. `mergeIdOcrResults()` returns a
+ * plain object of this shape — JSON.stringify() it directly to get the schema's payload.
+ */
 export interface PhIdOcrResult {
   id_type?: IdType;
   common_fields: CommonFields;

@@ -54,11 +54,41 @@ configureOrtWasmPaths("/onnxruntime-wasm/"); // wherever you host the .wasm file
 const front = await runIdOcr(frontImage, "FRONT");
 const back = await runIdOcr(backImage, "BACK");
 
-const result = mergeIdOcrResults([front, back]); // matches the ph-id-schema JSON schema
+const result = mergeIdOcrResults([front, back]);
+// result is a plain JS object matching schema/ph-id-schema.json - JSON.stringify(result)
+// is exactly the payload to send wherever this needs to go next.
 ```
 
 Call `runIdOcr` with just the front image (`mergeIdOcrResults([front])`) if a
 document type has no useful text on the back.
+
+## Output
+
+`mergeIdOcrResults()` returns a plain object matching
+[`schema/ph-id-schema.json`](schema/ph-id-schema.json) — the exact schema you gave me —
+so `JSON.stringify(result)` is the payload. The `PhIdOcrResult` TypeScript type in
+[`src/types.ts`](src/types.ts) is a hand-written mirror of that same schema (so you get
+autocomplete/type-checking on the result), not a separate format. Example output for a
+driver's license scanned front-only:
+
+```json
+{
+  "id_type": "DRIVERS_LICENSE",
+  "common_fields": {
+    "first_name": { "value": "JUAN", "confidence": 0.94, "source_side": "FRONT", "bounding_box": [120, 88, 240, 110] },
+    "last_name": { "value": "DELA CRUZ", "confidence": 0.93, "source_side": "FRONT", "bounding_box": [120, 60, 310, 82] },
+    "date_of_birth": { "value": "01/15/1990", "confidence": 0.91, "source_side": "FRONT", "bounding_box": [120, 140, 230, 160] },
+    "sex": { "value": "M", "confidence": 0.88, "source_side": "FRONT", "bounding_box": [120, 170, 145, 190] }
+  },
+  "variant_fields": {
+    "id_number": { "value": "N01-23-456789", "confidence": 0.9, "source_side": "FRONT", "bounding_box": [120, 200, 260, 220] },
+    "expiry_date": { "value": "01/15/2028", "confidence": 0.87, "source_side": "FRONT", "bounding_box": [120, 230, 230, 250] }
+  },
+  "document_provenance": [
+    { "side": "FRONT", "image_hash": "9f2e...c1a4", "raw_ocr_text": "...", "engine_version": "id-ocr-web/ppocrv5-mobile-onnxruntime-web@1.0.0" }
+  ]
+}
+```
 
 ## How it works
 
