@@ -42,6 +42,24 @@ assets to host wherever you serve the rest of your app's static files from.
    `runIdOcr` call.
 3. `npm install && npm run build`.
 
+## Try it locally first
+
+Before wiring this into your app, run the included demo page to confirm the pipeline
+actually works end-to-end against your bucket:
+
+```sh
+npm install
+npm run example   # starts a local dev server and opens example/index.html
+```
+
+Pick a front (and optional back) image of an already-cropped ID and click "Run OCR" —
+the page calls the exact same `runIdOcr`/`mergeIdOcrResults` functions your app will,
+and prints the resulting JSON. It needs step 1 above done (public bucket) to actually
+produce output; if that step isn't done yet, the page still loads, but OCR calls will
+fail with a fetch error naming the model URL that couldn't be reached — which itself
+confirms whether bucket access is the problem. See `example/main.ts` for the ~20 lines
+of wiring it takes.
+
 ## Usage
 
 ```ts

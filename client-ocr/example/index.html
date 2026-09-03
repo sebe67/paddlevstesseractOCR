@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>id-ocr-web example</title>
+  </head>
+  <body>
+    <h1>id-ocr-web demo</h1>
+    <p>
+      Pick a front image (and optional back image) of an already cropped/edge-straightened ID scan, then
+      click "Run OCR". This calls the same <code>runIdOcr</code> / <code>mergeIdOcrResults</code> functions
+      your app will use — see <a href="../README.md">../README.md</a> for how to wire them into a real app.
+      Requires the <code>idscan_ocr</code> bucket's model files to be public-read (see README setup step 1)
+      for OCR to actually run; the page itself will load regardless.
+    </p>
+    <p><label>Front image: <input id="front" type="file" accept="image/*" /></label></p>
+    <p><label>Back image (optional): <input id="back" type="file" accept="image/*" /></label></p>
+    <button id="run">Run OCR</button>
+    <pre id="output">(waiting)</pre>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
