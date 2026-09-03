@@ -1,6 +1,6 @@
 # PaddleOCR vs. Tesseract — Accuracy on Government ID Documents
 
-Compares [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) and [Tesseract](https://github.com/tesseract-ocr/tesseract) (via `pytesseract`) on scanned/photographed government ID documents — passports, driving licences, and ID cards.
+Compares [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) (default server models), [PaddleOCR's mobile models](https://github.com/PaddlePaddle/PaddleOCR) (`PP-OCRv5_mobile_det`/`rec`, the lightweight pair meant for on-device/edge deployment), and [Tesseract](https://github.com/tesseract-ocr/tesseract) (via `pytesseract`) on scanned/photographed government ID documents — passports, driving licences, and ID cards.
 
 ## Notebook
 
@@ -32,7 +32,7 @@ Swap `DOC_TYPES` in the notebook for any of the [other 46 codes](https://github.
 
 1. Download the selected MIDV-500 document types and sample a handful of frames per clip.
 2. Perspective-warp each frame using the ground-truth document quadrangle to get a straightened, cropped ID image.
-3. Run both OCR engines on the same crop.
+3. Run all three OCR engines on the same crop.
 4. Score each engine two ways against the ground-truth field values:
    - **Field recall** — fraction of known field values (fuzzy-)found in the OCR output.
    - **Character error rate (CER)** — Levenshtein distance between OCR output and ground truth, normalized by length.
