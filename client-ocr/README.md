@@ -6,6 +6,28 @@ backend) using PaddleOCR PP-OCRv5 mobile detection/recognition models — the im
 never leaves the device. The only network calls are the initial (cached) downloads of
 the three model assets from a public GCS bucket.
 
+## Where this code lives vs. where the models live
+
+This `src/` directory is **application source code**, not something users download on
+its own — it gets bundled by your app's normal build tool (Vite, webpack, Next.js,
+whatever you're already using) into your app's JS bundle, and reaches the user's
+device the same way the rest of your frontend already does. Wire it in by copying
+`src/*.ts` into your app, adding this directory as a local workspace package, or
+publishing it to a private registry and installing it as a dependency — then
+`import { runIdOcr, mergeIdOcrResults, configureOrtWasmPaths } from "id-ocr-web"`
+like any other module.
+
+The `idscan_ocr` **GCS bucket only holds the three model weight files**
+(`det_model.onnx`, `rec_model.onnx`, `ppocr_keys_v1.txt`). Those are multi-MB binary
+assets deliberately kept *out* of the JS bundle so the app's initial load stays small
+— this code `fetch()`s them lazily at runtime (the first time `runIdOcr()` needs them)
+and caches them in the browser. Don't put the TypeScript/compiled JS in that bucket;
+don't put the model weights in your app bundle.
+
+`onnxruntime-web`'s `.wasm` binaries are a third, separate thing this code needs at
+runtime (see step 2 below) — neither app code nor a PaddleOCR model, just static
+assets to host wherever you serve the rest of your app's static files from.
+
 ## Setup
 
 1. **Make the model files public-read** in the `idscan_ocr` bucket — this code fetches
