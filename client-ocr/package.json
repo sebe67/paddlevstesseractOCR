@@ -8,12 +8,15 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "example": "vite"
+    "example": "vite",
+    "check:live-models": "tsx scripts/live-model-check.mjs"
   },
   "dependencies": {
     "onnxruntime-web": "^1.19.2"
   },
   "devDependencies": {
+    "sharp": "^0.35.4",
+    "tsx": "^4.23.13",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   }

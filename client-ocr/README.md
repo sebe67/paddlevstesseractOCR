@@ -2,44 +2,57 @@
 
 Client-side (browser) OCR + field extraction for Philippine ID scans. Runs entirely
 on-device via [`onnxruntime-web`](https://github.com/microsoft/onnxruntime) (WASM
-backend) using PaddleOCR PP-OCRv5 mobile detection/recognition models — the image
-never leaves the device. The only network calls are the initial (cached) downloads of
-the three model assets from a public GCS bucket.
+backend) using PaddleOCR detection/recognition models — the image never leaves the
+device. The only network calls are the initial (cached) downloads of the model assets
+from a public GCS bucket. (See Status below: the currently deployed rec model is not
+actually PP-OCRv5 despite the module's name.)
 
 ## Status — read this before integrating
 
-- **The `idscan_ocr` bucket is not yet public.** All three model URLs currently return
-  403 to an anonymous fetch. This repo/module has no GCP credentials and cannot change
-  bucket IAM itself — someone with access to the `idscan_ocr` bucket needs to run:
-  ```sh
-  gsutil iam ch allUsers:objectViewer gs://idscan_ocr
-  ```
-  (or set equivalent object-level ACLs). Until this is done, nothing in this module can
-  run past the initial model fetch.
-- **The dictionary filename was wrong and has been fixed.** `config.ts` previously
-  pointed at `ppocr_keys_v1.txt` (6,623 entries — the PP-OCRv3/v4 dictionary). The rec
-  model this module targets is PP-OCRv5 mobile, whose correct dictionary is
-  `ppocrv5_dict.txt` (18,383 entries, confirmed against PaddleOCR's own repo). `config.ts`
-  now requests `ppocrv5_dict.txt` — **make sure that file (not `ppocr_keys_v1.txt`) is
-  what's actually uploaded to the bucket under that name.** This was caught by a
-  code-review comparison of entry counts, not by running the pipeline (see below) — if
-  your `rec_model.onnx` turns out to actually be a v3/v4 export rather than v5, it's the
-  dictionary claim that's wrong, not this fix; see "how to check" below.
-- **This has never been run end-to-end against real model weights.** Everything here
-  was built, typechecked, and build-verified (`tsc --noEmit`, `vite build` resolving all
-  imports) in an environment with no browser and no access to the actual `idscan_ocr`
-  bucket contents — so the *code* compiles and the *wiring* resolves, but the
-  detection/recognition math has not been validated against real ONNX outputs. Once the
-  bucket is public, running `npm run example` against a real ID photo is the first real
-  end-to-end test this pipeline will get. Please report back what breaks.
+- **The bucket is public and reachable — but objects live under a `v1.0/` prefix**,
+  not at the bucket root (confirmed via the bucket's public XML listing). `config.ts`'s
+  `DEFAULT_MODEL_BASE_URL` now points at
+  `https://storage.googleapis.com/idscan_ocr/v1.0/` to match.
+- **The deployed `rec_model.onnx` is not actually PP-OCRv5** despite this module's name
+  and earlier docs claiming it is. Confirmed by downloading the real file and inspecting
+  its ONNX graph directly (`onnx.load()`, Python): the output layer is 6,625-wide
+  (6,623 dict entries + blank + space), which only lines up with the legacy
+  `ppocr_keys_v1.txt` dictionary (PP-OCRv3/v4-generation), not the 18,385-wide output a
+  genuine PP-OCRv5 rec model would have. `config.ts` now requests `ppocr_keys_v1.txt`
+  (already correctly uploaded in the bucket) instead of the nonexistent
+  `ppocrv5_dict.txt` I'd pointed it at in an earlier pass. If you want real PP-OCRv5
+  accuracy, the rec (and probably det) model in the bucket needs re-exporting/re-uploading
+  — what's there now is functional but not the model this was originally scoped around.
+- **This has now been run end-to-end against the real deployed weights** — see "Run the
+  live model check" below. It correctly detected and read a test string, which
+  validated detection, the from-scratch DB post-processing geometry, cropping, and CTC
+  decoding all at once, and caught one more real bug in the process (see next point).
+  What it does *not* yet validate: real ID photos (perspective distortion, lower
+  contrast/lighting, glare, the field-extraction/label-matching layer) — that still
+  needs a real scan, which this environment doesn't have access to.
+- **Fixed: confidence scores were meaningless (always ≈0).** The deployed
+  `rec_model.onnx`'s output tensor is literally named `softmax_11.tmp_0` — it already
+  applies softmax internally. `recognize.ts` was applying a second softmax on top of
+  already-[0,1]-bounded values, which flattens everything toward uniform
+  (≈1/6625 ≈ 0.00015). Didn't affect which character got picked (softmax is monotonic),
+  but every `confidence` field in the output was garbage. Now auto-detects whether a
+  timestep's output row already sums to ~1 and skips the redundant softmax when it does
+  — confidence on the test string came out 0.961 after the fix, vs. 0.000 before.
 
-**How to check the rec model's actual version**, once you can read the bucket: open
-`rec_model.onnx` in [Netron](https://netron.app/) (drag-and-drop, no install) and check
-the final output node's shape — the last dimension is the class count. It should read
-18,383 (+ blank + space = charset length in `recognize.ts`) if this is genuinely
-PP-OCRv5 mobile. If it reads ~6,625 instead, the model is actually v3/v4 and
-`ppocr_keys_v1.txt` was the correct file all along — flip `config.ts` back and let me
-know so I can also fix the README/comments claiming this is v5 throughout.
+## Run the live model check
+
+```sh
+npm install
+npm run check:live-models
+```
+
+Fetches the real `det_model.onnx`/`rec_model.onnx`/dictionary from the live bucket and
+runs them (via `onnxruntime-web`'s wasm backend, in plain Node — no browser required)
+against a synthetic "DELA CRUZ" text image, reusing the real detection geometry from
+`src/geometry.ts` unmodified. Prints the detected box, decoded text, and confidence —
+currently decodes correctly with confidence 0.961. Re-run this any time the bucket's
+model files change, as a fast sanity check before touching a real ID scan. See
+`scripts/live-model-check.mjs`.
 
 ## Where this code lives vs. where the models live
 
@@ -53,7 +66,8 @@ publishing it to a private registry and installing it as a dependency — then
 like any other module.
 
 The `idscan_ocr` **GCS bucket only holds the three model weight files**
-(`det_model.onnx`, `rec_model.onnx`, `ppocrv5_dict.txt`). Those are multi-MB binary
+(`det_model.onnx`, `rec_model.onnx`, `ppocr_keys_v1.txt`, all under a `v1.0/` prefix).
+Those are multi-MB binary
 assets deliberately kept *out* of the JS bundle so the app's initial load stays small
 — this code `fetch()`s them lazily at runtime (the first time `runIdOcr()` needs them)
 and caches them in the browser. Don't put the TypeScript/compiled JS in that bucket;
@@ -65,12 +79,10 @@ assets to host wherever you serve the rest of your app's static files from.
 
 ## Setup
 
-1. **Make the model files public-read** in the `idscan_ocr` bucket — this code fetches
-   them directly from the browser with no credentials, so `det_model.onnx`,
-   `rec_model.onnx`, and `ppocrv5_dict.txt` must be publicly readable
-   (`gsutil iam ch allUsers:objectViewer gs://idscan_ocr`, or set object ACLs). `cls_model.onnx`
-   is not used — orientation classification is skipped since input images already
-   arrive edge-straightened/upright.
+1. ~~Make the model files public-read~~ **Done** — confirmed via anonymous fetch.
+   `cls_model.onnx` is uploaded too but not used by this module — orientation
+   classification is skipped since input images already arrive
+   edge-straightened/upright.
 2. **Host `onnxruntime-web`'s `.wasm` binaries** somewhere your app serves static
    assets from (they ship in `node_modules/onnxruntime-web/dist/`), or point at a CDN
    build. Call `configureOrtWasmPaths(url)` once at app startup before the first
@@ -161,7 +173,7 @@ license scanned front-only:
    components → `minAreaRect` per blob → score/size filter → unclip → text-line boxes.
 2. **Crop & straighten** each box out of the source image via a two-triangle affine
    warp (`perspective.ts`), then **recognize** (`rec_model.onnx`) with greedy CTC
-   decoding against `ppocrv5_dict.txt`.
+   decoding against `ppocr_keys_v1.txt`.
 3. **Classify `id_type`** via keyword hits across the recognized text (override with
    `runIdOcr(image, side, { idType: "PASSPORT" })` if the caller already knows it).
 4. **Extract fields**: match each field's label aliases (English + Filipino) against
@@ -184,9 +196,12 @@ license scanned front-only:
   here. Field recall on these two will likely be lower regardless of tuning; the
   keyword-based (rather than fixed-position) extraction approach here is meant to be
   the more robust choice for that reason.
-- **Untested against real model weights at runtime** — see the Status section at the
-  top; this is the single biggest open risk and the reason to run `npm run example`
-  against a real scan before building further on top of this.
+- **Validated against a synthetic test string, not yet a real ID photo.** See Status
+  above — `npm run check:live-models` proves the pipeline works against the real
+  deployed weights, but a clean rendered "DELA CRUZ" string is a much easier case than
+  a real photo (perspective distortion, glare, lower contrast, a laminated/glossy
+  surface). Running `npm run example` against an actual ID scan is the next real test,
+  and the one that will actually tell you what field-recall to expect.
 - **No batching** — each detected text line runs through the rec model one at a time.
   Fine for a single ID scan; worth batching if you see this pipeline used somewhere
   latency-sensitive with many lines.
