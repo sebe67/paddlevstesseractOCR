@@ -2,7 +2,7 @@ import * as ort from "onnxruntime-web";
 import { canvasRegionToNormalizedTensor } from "./imageUtils";
 
 export interface RecCharset {
-  /** Index 0 is the reserved CTC blank; the rest mirrors ppocr_keys_v1.txt plus a trailing space. */
+  /** Index 0 is the reserved CTC blank; the rest mirrors the loaded dictionary file (ppocrv5_dict.txt for PP-OCRv5 mobile) plus a trailing space. */
   chars: string[];
 }
 
@@ -44,8 +44,9 @@ export async function recognizeLine(
   if (C !== charset.chars.length) {
     console.warn(
       `id-ocr-web: rec model outputs ${C} classes but the loaded charset has ${charset.chars.length} entries ` +
-        "(blank + ppocr_keys_v1.txt + space). Decoded text will be misaligned — confirm ppocr_keys_v1.txt matches " +
-        "the deployed rec_model.onnx."
+        "(blank + dictionary file + space). Decoded text will be misaligned — confirm the dictionary file " +
+        "loaded via OcrModelConfig.keysUrl matches the deployed rec_model.onnx's training dictionary " +
+        "(PP-OCRv5 mobile needs ppocrv5_dict.txt's 18,383 entries, NOT the older ppocr_keys_v1.txt's 6,623)."
     );
   }
 
