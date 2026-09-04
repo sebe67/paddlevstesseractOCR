@@ -3,7 +3,13 @@ import { configureOrtWasmPaths, runIdOcr, mergeIdOcrResults } from "../src/index
 // onnxruntime-web's wasm binaries, served from a CDN for this example so it runs with
 // zero extra setup. In your real app, host these yourself instead (README setup step 2)
 // rather than depending on a third-party CDN at runtime.
-configureOrtWasmPaths("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/");
+//
+// IMPORTANT: this version number must exactly match the onnxruntime-web version actually
+// installed (package.json's "dependencies") - a mismatch between the JS bindings and the
+// WASM binary throws opaque errors deep in their interop layer (e.g. "X.getValue is not a
+// function"). package.json now pins an exact version specifically to prevent this drifting
+// apart silently on a fresh `npm install`.
+configureOrtWasmPaths("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/");
 
 const frontInput = document.querySelector<HTMLInputElement>("#front")!;
 const backInput = document.querySelector<HTMLInputElement>("#back")!;

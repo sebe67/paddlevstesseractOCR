@@ -83,6 +83,16 @@ assets to host wherever you serve the rest of your app's static files from.
    assets from (they ship in `node_modules/onnxruntime-web/dist/`), or point at a CDN
    build. Call `configureOrtWasmPaths(url)` once at app startup before the first
    `runIdOcr` call.
+
+   **The version in that URL/path must exactly match the `onnxruntime-web` version in
+   your `package.json`.** A mismatch doesn't fail cleanly — it throws opaque errors deep
+   in their JS/WASM interop layer (e.g. `"X.getValue is not a function"`), because the JS
+   bindings and the WASM binary disagree about each other's internal structure. This is
+   exactly what happens if `onnxruntime-web` is left as a version *range* (`^1.19.2`) in
+   `package.json` — a plain `npm install` months later can silently resolve to a much
+   newer version than whatever's hardcoded in your `configureOrtWasmPaths` call. That's
+   why `package.json` here pins an exact version rather than a range; keep it that way,
+   and update both places together if you ever bump it.
 3. `npm install && npm run build`.
 
 ## Try it locally first
