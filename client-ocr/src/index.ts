@@ -171,6 +171,8 @@ export function mergeIdOcrResults(results: RunIdOcrResult[]): PhIdOcrResult {
 }
 
 export { defaultModelConfig } from "./config";
+export { registerId, RegistrationError, DEFAULT_REGISTRATION_ENDPOINT } from "./registration";
+export type { RegistrationEnvelope, RegistrationSuccessResponse } from "./registration";
 export type {
   CommonFields,
   DocumentProvenanceEntry,

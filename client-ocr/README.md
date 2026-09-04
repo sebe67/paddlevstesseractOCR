@@ -130,14 +130,11 @@ type level: `PhIdOcrResult.common_fields` is `RequiredCommonFields`, not the loo
 `CommonFields` used for a single side's in-progress result, so code that tries to send
 an incomplete object fails to compile instead of failing server-side with a 422.
 
-**Open question, not yet answered**: when OCR genuinely cannot read one of those three
-required fields, `mergeIdOcrResults()` fills it with `{ value: "", confidence: 0 }`
-rather than a null or omitting it (since the schema requires the key to exist).
-Whether that's actually what `/api/v1/register` wants signaled for "could not read
-this" — versus, say, rejecting the submission client-side before it's ever sent, or a
-different sentinel value — needs an answer from whoever owns `registration-service`;
-it's not something this repo can determine on its own. Example output for a driver's
-license scanned front-only:
+**Confirmed**: when OCR genuinely cannot read one of those three required fields,
+`mergeIdOcrResults()` fills it with `{ value: "", confidence: 0 }` rather than a null
+or omitting it (since the schema requires the key to exist) — a total OCR failure
+produces the minimum-required, mostly-empty shape rather than a bloated one. Example
+output for a driver's license scanned front-only:
 
 ```json
 {
@@ -157,6 +154,45 @@ license scanned front-only:
   ]
 }
 ```
+
+## Sending to registration-service
+
+`src/registration.ts` is a small, separate module (not part of the core OCR pipeline
+— `runIdOcr`/`mergeIdOcrResults` never call it) that POSTs a result to
+`registration-service`'s `/api/v1/register`:
+
+```ts
+import { registerId, RegistrationError } from "id-ocr-web";
+
+try {
+  const response = await registerId(result); // result = mergeIdOcrResults(...) output
+  console.log(response.status, response.message, response.id_type);
+} catch (err) {
+  if (err instanceof RegistrationError) {
+    console.error(`registration-service ${err.httpStatus}:`, err.body);
+  } else {
+    throw err;
+  }
+}
+```
+
+**What this does and doesn't cover, as of the latest contract round-trip:**
+- Confirmed and implemented: the request envelope is exactly `{ "id_data": <payload> }`
+  (no other top-level keys — sending extras today would silently vanish rather than
+  error, since the service doesn't yet reject unknown properties), and the 201
+  response is `{ status, message, id_type }` with no ID or timestamp.
+- **Deliberately not implemented yet**: a `client_reference` and `consent` field on
+  the request, and a `registration_id`/`created_at` on the response. Both are agreed
+  to be needed (see the questions sent back to the service owner) but aren't live on
+  the service yet — `RegistrationEnvelope`/`RegistrationSuccessResponse` in
+  `registration.ts` intentionally don't include them, specifically so nothing here can
+  silently rely on fields the server will just drop. Once the service's contract
+  actually declares them, extend both types and `registerId`'s signature together.
+- No authentication is sent, matching the service's current (unauthenticated) state —
+  update this once auth is added server-side.
+- There's currently no way to look up a submission after `registerId()` returns — no
+  registration ID comes back, and there's no documented read path. Don't build any
+  "check on this submission later" flow on top of this until that's resolved.
 
 ## How it works
 
