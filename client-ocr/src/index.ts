@@ -14,6 +14,7 @@ import type {
   IdType,
   PhIdOcrResult,
   RecognizedTextLine,
+  RequiredCommonFields,
   VariantFields,
 } from "./types";
 
@@ -133,32 +134,45 @@ const REQUIRED_COMMON_FIELDS: (keyof CommonFields)[] = ["first_name", "last_name
  * found are filled with an empty, zero-confidence placeholder rather than omitted.
  */
 export function mergeIdOcrResults(results: RunIdOcrResult[]): PhIdOcrResult {
-  const merged: PhIdOcrResult = { common_fields: {}, variant_fields: {}, document_provenance: [] };
+  const commonFields: CommonFields = {};
+  const variantFields: VariantFields = {};
+  const provenance: DocumentProvenanceEntry[] = [];
+  let idType: IdType | undefined;
 
   for (const r of results) {
-    if (r.idType && !merged.id_type) merged.id_type = r.idType;
+    if (r.idType && !idType) idType = r.idType;
 
     for (const [key, field] of Object.entries(r.common_fields) as [keyof CommonFields, CommonFields[keyof CommonFields]][]) {
       if (!field) continue;
-      const existing = merged.common_fields[key];
-      if (!existing || field.confidence > existing.confidence) merged.common_fields[key] = field;
+      const existing = commonFields[key];
+      if (!existing || field.confidence > existing.confidence) commonFields[key] = field;
     }
     for (const [key, field] of Object.entries(r.variant_fields) as [keyof VariantFields, VariantFields[keyof VariantFields]][]) {
       if (!field) continue;
-      const existing = merged.variant_fields![key];
-      if (!existing || field.confidence > existing.confidence) merged.variant_fields![key] = field;
+      const existing = variantFields[key];
+      if (!existing || field.confidence > existing.confidence) variantFields[key] = field;
     }
-    merged.document_provenance!.push(r.provenance);
+    provenance.push(r.provenance);
   }
 
   for (const field of REQUIRED_COMMON_FIELDS) {
-    merged.common_fields[field] ??= { value: "", confidence: 0 };
+    commonFields[field] ??= { value: "", confidence: 0 };
   }
 
-  return merged;
+  return {
+    id_type: idType,
+    // Safe cast: the loop above unconditionally sets first_name, last_name, and
+    // date_of_birth, so commonFields now satisfies RequiredCommonFields even though
+    // TS can't see that guarantee across the loop boundary.
+    common_fields: commonFields as RequiredCommonFields,
+    variant_fields: variantFields,
+    document_provenance: provenance,
+  };
 }
 
 export { defaultModelConfig } from "./config";
+export { registerId, RegistrationError, DEFAULT_REGISTRATION_ENDPOINT } from "./registration";
+export type { RegistrationEnvelope, RegistrationSuccessResponse } from "./registration";
 export type {
   CommonFields,
   DocumentProvenanceEntry,
@@ -167,5 +181,6 @@ export type {
   OcrField,
   PhIdOcrResult,
   RecognizedTextLine,
+  RequiredCommonFields,
   VariantFields,
 } from "./types";

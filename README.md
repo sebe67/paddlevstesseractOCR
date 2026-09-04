@@ -28,6 +28,14 @@ Default document types used (all Latin-script, so a single PaddleOCR/Tesseract l
 
 Swap `DOC_TYPES` in the notebook for any of the [other 46 codes](https://github.com/fcakyon/midv500/blob/master/midv500/download_dataset.py) to try other scripts (Cyrillic, CJK, Arabic) — that tends to be where the two engines diverge most.
 
+## On-device OCR module
+
+[`client-ocr/`](client-ocr/README.md) is a follow-on deliverable from this benchmark:
+a TypeScript module that runs PaddleOCR's PP-OCRv5 mobile models client-side in the
+browser (via `onnxruntime-web`) to OCR and field-extract Philippine ID scans, with the
+image never leaving the user's device. See [`client-ocr/README.md`](client-ocr/README.md)
+for setup and integration.
+
 ## Method
 
 1. Download the selected MIDV-500 document types and sample a handful of frames per clip.
