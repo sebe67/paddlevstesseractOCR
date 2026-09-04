@@ -32,8 +32,13 @@ downloads of the model assets from a public GCS bucket.
 
 ## Run the live model check
 
+This needs two extra dev tools (`tsx` to run TypeScript directly, `sharp` for image
+decoding) that aren't part of the default install, since they're only needed for this
+one verification script, not for actually using the library or running the demo:
+
 ```sh
 npm install
+npm install --save-dev tsx sharp
 npm run check:live-models
 ```
 

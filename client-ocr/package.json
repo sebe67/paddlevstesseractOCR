@@ -15,8 +15,6 @@
     "onnxruntime-web": "^1.19.2"
   },
   "devDependencies": {
-    "sharp": "^0.35.4",
-    "tsx": "^4.23.13",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   }
