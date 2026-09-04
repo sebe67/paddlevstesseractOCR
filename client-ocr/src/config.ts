@@ -12,25 +12,19 @@ export interface OcrModelConfig {
  * orientation classification is skipped since input images already arrive
  * edge-straightened/upright.
  *
- * Objects currently live under a v1.0/ prefix in the bucket (confirmed via the
- * bucket's public XML listing on 2026-09-04), not at the bucket root.
- *
- * The dictionary file is ppocr_keys_v1.txt (6,623 entries), confirmed to match the
- * deployed rec_model.onnx: its actual ONNX output layer is 6,625-wide (6,623 dict
- * entries + blank + space) — inspected directly via `onnx.load()` on the downloaded
- * model, not assumed. That output width does NOT match ppocrv5_dict.txt (18,383
- * entries, 18,385-wide output), so despite the "PP-OCRv5 mobile" name on this
- * module, the rec model actually deployed here is a PP-OCRv3/v4-generation model.
- * If you re-export/re-upload a genuine PP-OCRv5 rec model later, this needs to
- * change back to a v5 dictionary — see recognize.ts's runtime class-count check,
- * which will fire a console warning if these two ever drift out of sync again.
+ * v1.1/ holds a genuine PP-OCRv5 mobile rec model (confirmed via onnx.load() on the
+ * downloaded file: output layer is 18,385-wide, matching ppocrv5_dict.txt's 18,383
+ * entries + blank + space) paired with ppocrv5_dict.txt — unlike v1.0/, which turned
+ * out to be a PP-OCRv3/v4-generation model despite its naming. Verified end-to-end
+ * against these exact files via `npm run check:live-models` before switching this
+ * default over.
  */
-export const DEFAULT_MODEL_BASE_URL = "https://storage.googleapis.com/idscan_ocr/v1.0/";
+export const DEFAULT_MODEL_BASE_URL = "https://storage.googleapis.com/idscan_ocr/v1.1/";
 
 export function defaultModelConfig(baseUrl: string = DEFAULT_MODEL_BASE_URL): OcrModelConfig {
   return {
     detModelUrl: `${baseUrl}det_model.onnx`,
     recModelUrl: `${baseUrl}rec_model.onnx`,
-    keysUrl: `${baseUrl}ppocr_keys_v1.txt`,
+    keysUrl: `${baseUrl}ppocrv5_dict.txt`,
   };
 }

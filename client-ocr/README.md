@@ -2,42 +2,33 @@
 
 Client-side (browser) OCR + field extraction for Philippine ID scans. Runs entirely
 on-device via [`onnxruntime-web`](https://github.com/microsoft/onnxruntime) (WASM
-backend) using PaddleOCR detection/recognition models — the image never leaves the
-device. The only network calls are the initial (cached) downloads of the model assets
-from a public GCS bucket. (See Status below: the currently deployed rec model is not
-actually PP-OCRv5 despite the module's name.)
+backend) using genuine PaddleOCR PP-OCRv5 mobile detection/recognition models — the
+image never leaves the device. The only network calls are the initial (cached)
+downloads of the model assets from a public GCS bucket.
 
 ## Status — read this before integrating
 
-- **The bucket is public and reachable — but objects live under a `v1.0/` prefix**,
-  not at the bucket root (confirmed via the bucket's public XML listing). `config.ts`'s
-  `DEFAULT_MODEL_BASE_URL` now points at
-  `https://storage.googleapis.com/idscan_ocr/v1.0/` to match.
-- **The deployed `rec_model.onnx` is not actually PP-OCRv5** despite this module's name
-  and earlier docs claiming it is. Confirmed by downloading the real file and inspecting
-  its ONNX graph directly (`onnx.load()`, Python): the output layer is 6,625-wide
-  (6,623 dict entries + blank + space), which only lines up with the legacy
-  `ppocr_keys_v1.txt` dictionary (PP-OCRv3/v4-generation), not the 18,385-wide output a
-  genuine PP-OCRv5 rec model would have. `config.ts` now requests `ppocr_keys_v1.txt`
-  (already correctly uploaded in the bucket) instead of the nonexistent
-  `ppocrv5_dict.txt` I'd pointed it at in an earlier pass. If you want real PP-OCRv5
-  accuracy, the rec (and probably det) model in the bucket needs re-exporting/re-uploading
-  — what's there now is functional but not the model this was originally scoped around.
-- **This has now been run end-to-end against the real deployed weights** — see "Run the
-  live model check" below. It correctly detected and read a test string, which
-  validated detection, the from-scratch DB post-processing geometry, cropping, and CTC
-  decoding all at once, and caught one more real bug in the process (see next point).
-  What it does *not* yet validate: real ID photos (perspective distortion, lower
-  contrast/lighting, glare, the field-extraction/label-matching layer) — that still
-  needs a real scan, which this environment doesn't have access to.
-- **Fixed: confidence scores were meaningless (always ≈0).** The deployed
-  `rec_model.onnx`'s output tensor is literally named `softmax_11.tmp_0` — it already
-  applies softmax internally. `recognize.ts` was applying a second softmax on top of
-  already-[0,1]-bounded values, which flattens everything toward uniform
-  (≈1/6625 ≈ 0.00015). Didn't affect which character got picked (softmax is monotonic),
-  but every `confidence` field in the output was garbage. Now auto-detects whether a
-  timestep's output row already sums to ~1 and skips the redundant softmax when it does
-  — confidence on the test string came out 0.961 after the fix, vs. 0.000 before.
+- **Now running genuine PP-OCRv5 mobile models, confirmed** — `idscan_ocr/v1.1/`
+  (`config.ts`'s `DEFAULT_MODEL_BASE_URL`). Downloaded the real `rec_model.onnx` and
+  inspected its ONNX graph directly: output layer is 18,385-wide, exactly matching
+  `ppocrv5_dict.txt`'s 18,383 entries + blank + space. (`v1.0/`, the previous default,
+  turned out to be a PP-OCRv3/v4-generation model despite its naming — see git history
+  if you need that story. It's still in the bucket but no longer the default.)
+- **Run end-to-end against these exact v1.1 weights** via `npm run check:live-models`
+  (see below) — correctly detected and decoded a test string with 0.985 confidence.
+  That validates detection, the from-scratch DB post-processing geometry, cropping, and
+  CTC decoding all at once, against the real deployed files, not a guess.
+- **What's still unvalidated**: real ID photos. The live check above uses a clean
+  rendered test string — perspective distortion, lower contrast/lighting, glare, and
+  the field-extraction/label-matching layer all still need a real scan, which this
+  environment doesn't have access to. `npm run example` against an actual ID is the
+  next real test.
+- **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
+  against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
+  softmax internally, in which case using the raw output values as confidence directly
+  is correct; `recognize.ts` now auto-detects this per-timestep (checks whether a row
+  already sums to ~1) rather than assuming, so it works correctly across both the v1.0
+  and v1.1 model exports despite their different internal op-naming conventions.
 
 ## Run the live model check
 
@@ -50,7 +41,7 @@ Fetches the real `det_model.onnx`/`rec_model.onnx`/dictionary from the live buck
 runs them (via `onnxruntime-web`'s wasm backend, in plain Node — no browser required)
 against a synthetic "DELA CRUZ" text image, reusing the real detection geometry from
 `src/geometry.ts` unmodified. Prints the detected box, decoded text, and confidence —
-currently decodes correctly with confidence 0.961. Re-run this any time the bucket's
+currently decodes correctly with confidence 0.985. Re-run this any time the bucket's
 model files change, as a fast sanity check before touching a real ID scan. See
 `scripts/live-model-check.mjs`.
 
@@ -66,7 +57,7 @@ publishing it to a private registry and installing it as a dependency — then
 like any other module.
 
 The `idscan_ocr` **GCS bucket only holds the three model weight files**
-(`det_model.onnx`, `rec_model.onnx`, `ppocr_keys_v1.txt`, all under a `v1.0/` prefix).
+(`det_model.onnx`, `rec_model.onnx`, `ppocrv5_dict.txt`, all under a `v1.1/` prefix).
 Those are multi-MB binary
 assets deliberately kept *out* of the JS bundle so the app's initial load stays small
 — this code `fetch()`s them lazily at runtime (the first time `runIdOcr()` needs them)
@@ -173,7 +164,7 @@ license scanned front-only:
    components → `minAreaRect` per blob → score/size filter → unclip → text-line boxes.
 2. **Crop & straighten** each box out of the source image via a two-triangle affine
    warp (`perspective.ts`), then **recognize** (`rec_model.onnx`) with greedy CTC
-   decoding against `ppocr_keys_v1.txt`.
+   decoding against `ppocrv5_dict.txt`.
 3. **Classify `id_type`** via keyword hits across the recognized text (override with
    `runIdOcr(image, side, { idType: "PASSPORT" })` if the caller already knows it).
 4. **Extract fields**: match each field's label aliases (English + Filipino) against

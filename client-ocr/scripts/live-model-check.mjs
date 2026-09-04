@@ -17,7 +17,7 @@ import {
 } from "../src/geometry.ts";
 
 
-const BASE = "https://storage.googleapis.com/idscan_ocr/v1.0/";
+const BASE = "https://storage.googleapis.com/idscan_ocr/v1.1/";
 
 async function fetchBytes(url) {
   const res = await fetch(url);
@@ -34,13 +34,13 @@ console.log("Fetching real model files from the live bucket...");
 const [detBytes, recBytes, keysText] = await Promise.all([
   fetchBytes(BASE + "det_model.onnx"),
   fetchBytes(BASE + "rec_model.onnx"),
-  fetchText(BASE + "ppocr_keys_v1.txt"),
+  fetchText(BASE + "ppocrv5_dict.txt"),
 ]);
 console.log(`det_model.onnx: ${detBytes.length} bytes`);
 console.log(`rec_model.onnx: ${recBytes.length} bytes`);
 const dictLines = keysText.split(/\r?\n/).filter((l) => l.length > 0);
 const charset = ["", ...dictLines, " "];
-console.log(`ppocr_keys_v1.txt: ${dictLines.length} entries -> charset length ${charset.length}`);
+console.log(`ppocrv5_dict.txt: ${dictLines.length} entries -> charset length ${charset.length}`);
 
 console.log("\nCreating inference sessions...");
 const detSession = await ort.InferenceSession.create(detBytes, { executionProviders: ["wasm"] });
