@@ -1,6 +1,6 @@
 {
   "name": "id-ocr-web",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "private": true,
   "description": "Client-side (browser) OCR + field extraction for Philippine ID scans, using PaddleOCR PP-OCRv5 mobile det/rec models via onnxruntime-web. No image data leaves the device.",
   "type": "module",

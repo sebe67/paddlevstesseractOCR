@@ -77,18 +77,42 @@ function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matc
   if (text.startsWith(alias)) return { matched: true, matchedLength: alias.length, exact: true };
 
   const threshold = Math.max(1, Math.round(alias.length * FUZZY_EDIT_RATIO));
-  // Short aliases (a single short word, like "sex") are only ever compared at their own
-  // exact length. Letting them match a shorter text prefix too is what let "Expiration
+
+  // Check the WHOLE text against the alias first, before searching shorter prefixes: if
+  // the entire line is basically just this label (garbled, or with a little trailing
+  // punctuation), that's a stronger, less ambiguous signal than a shorter partial-prefix
+  // match - even when a shorter prefix scores a marginally lower raw edit distance. A
+  // real bug report had "Birthdate:" (10 chars) go unrecognized as date_of_birth's
+  // label: comparing against "birth date" (10 chars), the algorithm preferred a 1-edit
+  // match at length 9 ("birthdate") over the 2-edit match at the full length 10
+  // ("birthdate:"), even though the longer one was still well within tolerance - so the
+  // match came back as a partial, non-full-consuming one instead of "this whole line is
+  // the label," and got rejected downstream by the exact-only-remainder rule below.
+  const fullDist = levenshtein(text, alias);
+  if (fullDist <= threshold) return { matched: true, matchedLength: text.length, exact: false };
+
+  // No good whole-line match. Short aliases (a single short word, like "sex") are only
+  // ever additionally compared at their own exact length, never a shorter prefix of a
+  // longer text. Letting them match a shorter text prefix too is what let "Expiration
   // Date" collide with "sex": its first two characters, "ex", are edit-distance 1 from
   // "sex" purely because both strings being compared are tiny, not because they mean the
-  // same thing. Longer, usually multi-word aliases get a wider length window, since
-  // recovering a real character drop (a missing OCR'd space, e.g. "Fint Nama.Middie Name"
-  // for "First Name.Middle Name") needs a text prefix shorter or longer than the alias's
-  // own length to line up correctly - and there the length difference is a much smaller
-  // fraction of the total, so the coincidental-match risk is proportionally far lower.
+  // same thing.
   const isShortAlias = alias.length <= SHORT_ALIAS_MAX_LENGTH;
-  const lo = isShortAlias ? alias.length : Math.max(1, alias.length - 2);
-  const hi = isShortAlias ? alias.length : alias.length + 3;
+  if (isShortAlias) {
+    if (alias.length > text.length) return { matched: false, matchedLength: 0, exact: false };
+    const dist = levenshtein(text.slice(0, alias.length), alias);
+    return dist <= threshold
+      ? { matched: true, matchedLength: alias.length, exact: false }
+      : { matched: false, matchedLength: 0, exact: false };
+  }
+
+  // Longer, usually multi-word aliases get a wider length window, since recovering a
+  // real character drop (a missing OCR'd space, e.g. "Fint Nama.Middie Name" for "First
+  // Name.Middle Name") needs a text prefix shorter or longer than the alias's own length
+  // to line up correctly - and there the length difference is a much smaller fraction of
+  // the total, so the coincidental-match risk is proportionally far lower.
+  const lo = Math.max(1, alias.length - 2);
+  const hi = alias.length + 3;
   let best: { len: number; dist: number } | undefined;
   for (let len = lo; len <= Math.min(hi, text.length); len++) {
     const dist = levenshtein(text.slice(0, len), alias);
@@ -141,7 +165,12 @@ function isLabelOnlyText(text: string, allAliasLists: string[][]): boolean {
 // value can still have noise) - this only screens out candidates that couldn't possibly
 // be right, not ones that merely look unusual.
 const NUMERIC_VALUE_PATTERN = /^\d+(\.\d+)?\s*[a-zA-Z]{0,3}$/;
-const DATE_VALUE_PATTERN = /\d{2,4}[/\-.]\d{1,2}[/\-.]\d{1,4}/;
+// Two accepted shapes: numeric with slash/dash/dot separators ("2022/10/04"), or day +
+// month-name + year ("11 JULY1998", "16 MAR 1980" - a real TIN ID and a real passport
+// both print birthdates this way). The month-name form's day/year don't always have a
+// space from the month in the OCR output ("JULY1998" with no space before the year) -
+// \s* rather than \s+ between the month name and the year accounts for that.
+const DATE_VALUE_PATTERN = /\d{2,4}[/\-.]\d{1,2}[/\-.]\d{1,4}|\d{1,2}\s+[A-Za-z]{3,9}\.?\s*\d{4}/;
 // "M"/"F" (every real example seen so far), plus the spelled-out English/Filipino words
 // in case some layout prints those instead - never a whole place name or anything else
 // multi-word. A real bug report had a passport's sex resolve to "MANILA" (its actual

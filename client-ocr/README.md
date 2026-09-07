@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.12.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.13.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -143,8 +143,26 @@ downloads of the model assets from a public GCS bucket.
   happened to be geometrically closer. Fixed by deferring "NAME" resolution
   (`resolveStandaloneNameLabel`) to run only after every other field's own pass has
   already claimed its value, so a value like "PSYCHOSOCIAL" is correctly already `used`
-  by the time this runs. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/
-  PHILHEALTH/SENIOR_CITIZEN, and the BACK side of any type.
+  by the time this runs.
+- **A real TIN ID photo found a genuine bug in `fuzzyMatchPrefix` itself**, not just a
+  missing guard: its prefix-length search picked whichever length had the single lowest
+  raw edit distance, even when a *longer* length — up to and including the whole line —
+  was also within tolerance. Comparing "Birthdate:" (10 chars) against `date_of_birth`'s
+  "birth date" alias (10 chars), it preferred a 1-edit match at length 9 ("birthdate")
+  over the 2-edit match at the full length 10 ("birthdate:"), so the result came back as
+  a *partial* match rather than "this whole line is the label" — which the exact-only-
+  remainder rule then correctly refused to trust as a value-bearing match, so
+  "Birthdate:" was never recognized as a label at all. With no label to stop at,
+  `address`'s multi-line continuation walked straight through it (and the date after it)
+  as if they were more address text: `"...DAVAO CITY Birthdate: 11 JULY1998"`. Fixed by
+  checking the *whole* line against the alias first, only falling back to shorter
+  prefixes when that doesn't qualify. Once "Birthdate:" was correctly recognized as a
+  label, a second gap surfaced: its real value, "11 JULY1998" (day + month-name + year,
+  not a slash-separated numeric date), was still being rejected by `date_of_birth`'s
+  shape validator, which only accepted the numeric form — left the field unresolved
+  with no fallback (TIN IDs have no MRZ). `DATE_VALUE_PATTERN` now accepts both shapes.
+  Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/PHILHEALTH/SENIOR_CITIZEN, and
+  the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -160,7 +178,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with twelve scenarios, each
+Pure logic test (no model, no browser, no network) with thirteen scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -225,6 +243,14 @@ reproducing a real bug report:
     word alone). Synthetic, not from a specific bug report - this is the one heuristic
     in this file without a confirmed-correct real answer to check against, by nature of
     what it's guessing at.
+13. A real TIN ID photo, whose "Birthdate:" label went completely unrecognized -
+    `fuzzyMatchPrefix` preferred a shorter, lower-edit-distance partial match over a
+    longer one that was also within tolerance but consumed the whole line - so
+    `address`'s multi-line continuation walked straight through it, and the actual
+    birthdate value below it, as more address text. Also covers the date-shape
+    validator gap this same report surfaced once the label was fixed: a day + month-
+    name + year date ("11 JULY1998") was being rejected for not being the
+    slash-separated numeric form.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

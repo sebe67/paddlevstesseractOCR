@@ -526,4 +526,53 @@ undividedNamePass = checkUndividedName("plain", "JUAN SANTOS", "JUAN", "SANTOS")
 console.log(`\n${undividedNamePass ? "ALL PASSED" : "SOME FAILED"}`);
 
 allPass = allPass && undividedNamePass;
+
+// === Real TIN ID bug report ===
+// Two real bugs at once, both from the same underlying cause: fuzzyMatchPrefix's
+// prefix-length search picked whichever length had the single lowest raw edit distance,
+// even when a longer length (up to and including the whole line) was also within
+// tolerance. "Birthdate:" (10 chars) vs date_of_birth's "birth date" alias (10 chars):
+// the algorithm preferred a 1-edit match at length 9 ("birthdate") over the 2-edit match
+// at the full length 10 ("birthdate:"), so it came back as a partial match instead of
+// "this whole line is the label" - which the exact-only-remainder rule then correctly
+// refused to trust, so "Birthdate:" was never recognized as a label at all, and
+// address's multi-line continuation walked straight through it (and the date value
+// after it) as if they were more address text. Fixed by checking the whole line against
+// the alias first, only falling back to shorter prefixes if that doesn't qualify.
+// Separately, once "Birthdate:" was recognized as a label, its real value
+// ("11 JULY1998" - a real card printing day + month-name + year, not a slash-separated
+// numeric date) was still being rejected by date_of_birth's shape validator, which only
+// accepted the numeric form. Real lines from that report.
+const tinIdLines = [
+  line("TIN", [370.19607843137254, 121.11455108359132, 425.53725490196075, 153.62229102167183]),
+  line("302-280-158-61000", [370.9195505617978, 155.51271437019517, 853.6137827715356, 199.22412773506798]),
+  line("Name", [368.9802705758457, 208.20331579612497, 470.358396090821, 243.20721051966456]),
+  line("RAMOS,ELLA JOY", [371.85780423630075, 244.81208949396262, 653.1994261583427, 279.3604622058714]),
+  line("Address", [371.87480467689386, 302.14096073838783, 517.7557316837513, 341.7661416671818]),
+  line("BLK15LOT2 MALINAWON VILLAGE, MATINA", [374.89651162556436, 340.97344507784817, 1012.8373161991125, 372.50678776925747]),
+  line("CROSSING, DAVAO CITY", [377.9611285266458, 380.35637683550567, 723.9055381400209, 411.2225705329153]),
+  line("Birthdate:", [364.75659278331733, 464.8230878648276, 508.8870081899187, 499.90069238872593]),
+  line("TIN Issuance Date:", [610.2098377974713, 467.04009246336193, 850.0132674701965, 497.5590674880056]),
+  line("11 JULY1998", [366.33117399900306, 498.7185121092793, 515.8181510053348, 527.10334602382]),
+  line("21 OCTOBER2023", [614.395455410039, 496.4806440902891, 815.9586490182492, 522.7744433971009]),
+  line("SIGNATURE", [124.42236372539156, 583.767707795703, 243.5715431466873, 611.5647812944273]),
+];
+const tinIdResult = extractFields(tinIdLines, "TIN", "FRONT");
+
+console.log("\n=== Real TIN ID bug report ===\n");
+let tinIdPass = true;
+tinIdPass =
+  check(
+    "address",
+    tinIdResult.common_fields.address?.value,
+    "BLK15LOT2 MALINAWON VILLAGE, MATINA CROSSING, DAVAO CITY"
+  ) && tinIdPass;
+tinIdPass = check("date_of_birth", tinIdResult.common_fields.date_of_birth?.value, "11 JULY1998") && tinIdPass;
+
+console.log(`\n${tinIdPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!tinIdPass) {
+  console.log("\nFull output:", JSON.stringify(tinIdResult, null, 2));
+}
+
+allPass = allPass && tinIdPass;
 process.exit(allPass ? 0 : 1);
