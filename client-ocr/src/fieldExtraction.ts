@@ -572,6 +572,44 @@ function splitCompoundIdExpiry(lines: RecognizedTextLine[], variant: Record<stri
 }
 
 /**
+ * Some ID layouts (e.g. PWD) print one undivided "NAME" field instead of separate
+ * label(s) - resolved here as a deliberately deferred, last-resort step, called only
+ * after every other field's own resolution pass has already run and claimed its value,
+ * not as one of last_name's regular aliases. Running it earlier let its search reach
+ * past its own real value to steal a *different* field's value instead: a real bug
+ * report had "NAME"'s nearest-candidate search skip past "JUAN DELA CRUZ" (its real
+ * value, above it) and grab "PSYCHOSOCIAL" (below it) - which was actually
+ * "TYPE OF DISABILITY"'s own value, sitting even closer to that label than to "NAME",
+ * but not yet claimed because "last_name" (checked before "pwd_disability_type" in the
+ * regular per-field pass) got there first. Deferring this until last means
+ * "PSYCHOSOCIAL" is already used by the time this runs, correctly excluding it.
+ */
+function resolveStandaloneNameLabel(
+  lines: RecognizedTextLine[],
+  used: Set<number>,
+  common: Record<string, OcrField | undefined>,
+  allAliasLists: string[][],
+  side: DocumentSide
+): void {
+  if (common.last_name) return;
+  const isAcceptableValue = (l: RecognizedTextLine) => !isLabelOnlyText(l.text, allAliasLists);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    const { matched, remainder } = matchLabel(lines[i].text, ["name"], allAliasLists);
+    if (!matched || remainder.length > 0) continue;
+
+    const found = findValueNear(lines[i], lines, used, isAcceptableValue);
+    if (found) {
+      used.add(i);
+      used.add(found.index);
+      common.last_name = toOcrField(found.line.text, found.line.confidence, found.line.boundingBox, side);
+    }
+    return;
+  }
+}
+
+/**
  * PH IDs print the full name as one line, "LASTNAME, FIRSTNAME MIDDLENAME" (confirmed
  * standard format - see README). Label matching has no way to know that: it finds this
  * whole line as the value for whichever name field's label sat nearest, which in
@@ -607,6 +645,65 @@ function splitCommaSeparatedName(common: Record<string, OcrField | undefined>): 
   if (middleWord && !common.middle_name?.value) {
     common.middle_name = { ...current, value: middleWord };
   }
+}
+
+// Filipino surnames routinely start with one of these compound-surname markers ("Dela
+// Cruz", "De los Santos", "San Juan", "Santa Maria"/"Sta. Maria", "Del Rosario"). A real
+// PWD ID prints its "NAME" field as one undivided value with no comma ("JUAN DELA
+// CRUZ") - recognizing these lets splitUndividedName below split it into
+// first_name/last_name without guessing where the surname starts from word count
+// alone, which would get a compound surname wrong more often than not. This is
+// necessarily a guess, not a fix with a confirmed-correct answer the way the rest of
+// this file's splits are: a name with no delimiter genuinely doesn't carry enough
+// information to always get right. Falls back to "last word only" when none of these
+// prefixes appear - correct for a plain single-word surname, wrong for a two-given-name
+// person with a plain surname (e.g. "JUAN PEDRO SANTOS" would wrongly take just
+// "SANTOS" as the surname).
+const SURNAME_PREFIX_WORDS = new Set([
+  "DE",
+  "DEL",
+  "DELA",
+  "DELOS",
+  "DELAS",
+  "LA",
+  "LAS",
+  "LOS",
+  "SAN",
+  "SANTA",
+  "STA",
+  "STO",
+  "SANTO",
+  "MAC",
+  "MC",
+  "VAN",
+  "VON",
+  "DI",
+]);
+
+/**
+ * Splits an undivided full name ("JUAN DELA CRUZ", no comma) into first_name/last_name
+ * using SURNAME_PREFIX_WORDS above. Only runs when splitCommaSeparatedName didn't
+ * already handle this value (no comma present) and first_name is still unresolved -
+ * "name" is deliberately the last, lowest-priority alias for last_name
+ * (idTypeAliases.ts), used only when nothing more specific matched.
+ */
+function splitUndividedName(common: Record<string, OcrField | undefined>): void {
+  const current = common.last_name;
+  if (!current || current.value.includes(",") || common.first_name?.value) return;
+
+  const words = current.value.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return;
+
+  let splitIndex = words.length - 1; // fallback: last word only is the surname
+  for (let i = 1; i < words.length; i++) {
+    if (SURNAME_PREFIX_WORDS.has(words[i].toUpperCase().replace(/\.$/, ""))) {
+      splitIndex = i;
+      break;
+    }
+  }
+
+  common.first_name = { ...current, value: words.slice(0, splitIndex).join(" ") };
+  common.last_name = { ...current, value: words.slice(splitIndex).join(" ") };
 }
 
 /**
@@ -687,7 +784,9 @@ export function extractFields(
   if (applicableVariantFields.includes("id_number") && applicableVariantFields.includes("expiry_date")) {
     splitCompoundIdExpiry(lines, variantTarget, side);
   }
+  resolveStandaloneNameLabel(lines, used, commonTarget, allAliasLists, side);
   splitCommaSeparatedName(commonTarget);
+  splitUndividedName(commonTarget);
 
   return { common_fields: common, variant_fields: variant };
 }

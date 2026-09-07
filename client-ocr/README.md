@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.11.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.12.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -125,13 +125,26 @@ downloads of the model assets from a public GCS bucket.
   instead of "PSYCHOSOCIAL", its real value directly above. Fixed by making the
   above/below distance comparison symmetric: whichever direction the nearest
   left-aligned candidate is actually in now wins, rather than only ever looking one way.
-  Open question this same card raised, not yet resolved: its "NAME" field prints one
-  undivided value ("JUAN DELA CRUZ", no comma) with no reliable cue for where the given
-  name ends and the surname begins - Filipino surnames are routinely compound ("DELA
-  CRUZ", "DE LOS SANTOS"), so a naive word-count split would be wrong as often as not.
-  Currently unaddressed (this field goes unresolved on this ID type) rather than guessed
-  at silently. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/
-  SENIOR_CITIZEN, and the BACK side of any type.
+  This same card also prints "NAME" as one undivided value ("JUAN DELA CRUZ", no comma)
+  with no reliable cue for where the given name ends and the surname begins - Filipino
+  surnames are routinely compound ("DELA CRUZ", "DE LOS SANTOS"). Per the project's own
+  choice (a naive word-count split trades some wrong guesses for having *something*
+  rather than leaving the field empty), `splitUndividedName` now recognizes common
+  compound-surname markers (DELA, DE LOS, SAN, SANTA/STA, DEL, MC, VAN, ...) and splits
+  there, falling back to "last word only" when no marker is found. This is a guess, not
+  a fix with a confirmed-correct answer the way this file's other splits are - a name
+  with no delimiter genuinely doesn't carry enough information to always get it right
+  (e.g. a plain surname preceded by a two-word given name, "JUAN PEDRO SANTOS", still
+  wrongly takes just "SANTOS"). Wiring this in surfaced a second, real bug of its own:
+  matching "NAME" as a regular alias (checked early, since `last_name` is a common field
+  processed before variant fields) let its search reach past its own real value
+  ("JUAN DELA CRUZ", above it) to steal "PSYCHOSOCIAL" - the *other* field's
+  ("TYPE OF DISABILITY") own value below it, not yet claimed - because that candidate
+  happened to be geometrically closer. Fixed by deferring "NAME" resolution
+  (`resolveStandaloneNameLabel`) to run only after every other field's own pass has
+  already claimed its value, so a value like "PSYCHOSOCIAL" is correctly already `used`
+  by the time this runs. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/
+  PHILHEALTH/SENIOR_CITIZEN, and the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -147,7 +160,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with eleven scenarios, each
+Pure logic test (no model, no browser, no network) with twelve scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -199,10 +212,19 @@ reproducing a real bug report:
     label fix) "Kasarian/Sex" label with no separately detected "F"/"M" character to
     find instead - purely because nothing checked whether "MANILA" was even shaped like
     a sex value.
-11. A real PWD ID photo - the first non-DRIVERS_LICENSE/PASSPORT type tested - whose
-    "TYPE OF DISABILITY" label sits *below* its value ("PSYCHOSOCIAL"), the opposite of
-    every layout tested so far; `findValueNear` only ever searched right or below a
-    label, so it resolved to "SIGNATURE" (the nearest thing below) instead.
+11. That same real PWD ID photo - the first non-DRIVERS_LICENSE/PASSPORT type tested -
+    whose "TYPE OF DISABILITY" label sits *below* its value ("PSYCHOSOCIAL"), the
+    opposite of every layout tested so far; `findValueNear` only ever searched right or
+    below a label, so it resolved to "SIGNATURE" (the nearest thing below) instead. This
+    scenario also covers the fix's own regression: an earlier version let "NAME"'s
+    search steal "PSYCHOSOCIAL" (rightfully `pwd_disability_type`'s value) before that
+    field got a chance to claim it, resolving `last_name` to "PSYCHOSOCIAL" instead of
+    "DELA CRUZ".
+12. `splitUndividedName`'s compound-surname handling in isolation: a multi-word prefix
+    ("DE LOS SANTOS") and the no-prefix fallback (a plain surname splits on the last
+    word alone). Synthetic, not from a specific bug report - this is the one heuristic
+    in this file without a confirmed-correct real answer to check against, by nature of
+    what it's guessing at.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
@@ -425,13 +447,19 @@ try {
    it. Rows of short labels with a value row
    below them are matched by nearest column, not left-to-right rank, so one label in
    the row failing to match at all doesn't shift every field after it onto the wrong
-   value. Two pattern-based passes run last: `splitCompoundIdExpiry` recovers
+   value. A handful of passes run last: `splitCompoundIdExpiry` recovers
    `id_number`/`expiry_date` when the text detector fuses their two cells into one OCR
-   line, and `splitCommaSeparatedName` splits the printed name — one line, PH IDs'
-   standard `"LASTNAME, FIRSTNAME MIDDLENAME"` format — into `last_name`/`first_name`/
-   `middle_name` rather than leaving it whole as `last_name`. For `PASSPORT`, also
-   parses the TD3 MRZ and uses it (checksum-validated) to fill in anything
-   template/label-matching missed.
+   line; `resolveStandaloneNameLabel` is a deliberately deferred, last-resort match for
+   a plain `"NAME"` label (some layouts, e.g. PWD, print one undivided name field
+   instead of separate labels) — deferred so its search can't reach past its own value
+   to steal a *different*, not-yet-claimed field's value first; `splitCommaSeparatedName`
+   splits the printed name — one line, PH IDs' standard
+   `"LASTNAME, FIRSTNAME MIDDLENAME"` format — into `last_name`/`first_name`/
+   `middle_name`; and `splitUndividedName` handles the undivided case
+   (`resolveStandaloneNameLabel` found a value but there's no comma to split on) by
+   recognizing common compound-surname markers (`"Dela Cruz"`, `"De los Santos"`, ...)
+   rather than guessing from word count alone. For `PASSPORT`, also parses the TD3 MRZ
+   and uses it (checksum-validated) to fill in anything template/label-matching missed.
 
 ## Known approximations / next steps for your team
 

@@ -486,11 +486,18 @@ const valueAboveLabelLines = [
 const valueAboveLabelResult = extractFields(valueAboveLabelLines, "PWD", "FRONT");
 
 console.log("\n=== Value-above-label test (real PWD ID bug report) ===\n");
-const valueAboveLabelPass = check(
-  "pwd_disability_type",
-  valueAboveLabelResult.variant_fields.pwd_disability_type?.value,
-  "PSYCHOSOCIAL"
-);
+let valueAboveLabelPass = true;
+valueAboveLabelPass =
+  check("pwd_disability_type", valueAboveLabelResult.variant_fields.pwd_disability_type?.value, "PSYCHOSOCIAL") &&
+  valueAboveLabelPass;
+// "NAME" is a deliberately deferred, last-resort match for last_name (see
+// resolveStandaloneNameLabel's comment) - checking it here, in the same scenario as
+// pwd_disability_type rather than in isolation, is the point: an earlier version of
+// this fix resolved last_name to "PSYCHOSOCIAL" (stealing pwd_disability_type's own
+// value) because "name" was tried as a regular alias in the normal per-field pass,
+// before pwd_disability_type got a chance to claim it. A real bug this scenario caught.
+valueAboveLabelPass = check("last_name", valueAboveLabelResult.common_fields.last_name?.value, "DELA CRUZ") && valueAboveLabelPass;
+valueAboveLabelPass = check("first_name", valueAboveLabelResult.common_fields.first_name?.value, "JUAN") && valueAboveLabelPass;
 
 console.log(`\n${valueAboveLabelPass ? "ALL PASSED" : "SOME FAILED"}`);
 if (!valueAboveLabelPass) {
@@ -498,4 +505,25 @@ if (!valueAboveLabelPass) {
 }
 
 allPass = allPass && valueAboveLabelPass;
+
+// === Undivided-name surname-prefix split test ===
+// Synthetic (not from a specific bug report), covering splitUndividedName's compound-
+// surname handling on its own: a multi-word prefix ("DE LOS SANTOS"), and the no-prefix
+// fallback (a plain surname with no compound marker splits on the last word alone).
+function checkUndividedName(name, fullName, expectedFirst, expectedLast) {
+  const testLines = [line("NAME", [400, 339, 516, 373]), line(fullName, [260, 281, 656, 320])];
+  const result = extractFields(testLines, "PWD", "FRONT");
+  const firstOk = check(`${name} first_name`, result.common_fields.first_name?.value, expectedFirst);
+  const lastOk = check(`${name} last_name`, result.common_fields.last_name?.value, expectedLast);
+  return firstOk && lastOk;
+}
+
+console.log("\n=== Undivided-name surname-prefix split test ===\n");
+let undividedNamePass = true;
+undividedNamePass = checkUndividedName("compound", "MARIA DE LOS SANTOS", "MARIA", "DE LOS SANTOS") && undividedNamePass;
+undividedNamePass = checkUndividedName("plain", "JUAN SANTOS", "JUAN", "SANTOS") && undividedNamePass;
+
+console.log(`\n${undividedNamePass ? "ALL PASSED" : "SOME FAILED"}`);
+
+allPass = allPass && undividedNamePass;
 process.exit(allPass ? 0 : 1);
