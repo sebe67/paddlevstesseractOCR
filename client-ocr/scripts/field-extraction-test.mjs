@@ -70,8 +70,8 @@ allPass = check("height", variant_fields.height?.value, "1.55") && allPass;
 allPass = check("id_number", variant_fields.id_number?.value, "N03-12-123456") && allPass;
 allPass = check("expiry_date", variant_fields.expiry_date?.value, "2022/10/04") && allPass;
 allPass = check("last_name", common_fields.last_name?.value, "DELA CRUZ") && allPass;
-allPass = check("first_name", common_fields.first_name?.value, "JUAN") && allPass;
-allPass = check("middle_name", common_fields.middle_name?.value, "PEDRO GARCIA") && allPass;
+allPass = check("first_name", common_fields.first_name?.value, "JUAN PEDRO") && allPass;
+allPass = check("middle_name", common_fields.middle_name?.value, "GARCIA") && allPass;
 
 console.log(`\n${allPass ? "ALL PASSED" : "SOME FAILED"}`);
 if (!allPass) {
@@ -152,9 +152,9 @@ let realPhotoPass = true;
 realPhotoPass = check("sex", realPhotoResult.common_fields.sex?.value, "M") && realPhotoPass;
 realPhotoPass = check("date_of_birth", realPhotoResult.common_fields.date_of_birth?.value, "2008/04/10") && realPhotoPass;
 realPhotoPass = check("last_name", realPhotoResult.common_fields.last_name?.value, "SILVA") && realPhotoPass;
-realPhotoPass = check("first_name", realPhotoResult.common_fields.first_name?.value, "SEBASTIAN") && realPhotoPass;
 realPhotoPass =
-  check("middle_name", realPhotoResult.common_fields.middle_name?.value, "VINCENT PABLO QUE") && realPhotoPass;
+  check("first_name", realPhotoResult.common_fields.first_name?.value, "SEBASTIAN VINCENT PABLO") && realPhotoPass;
+realPhotoPass = check("middle_name", realPhotoResult.common_fields.middle_name?.value, "QUE") && realPhotoPass;
 realPhotoPass = check("id_number", realPhotoResult.variant_fields.id_number?.value, "N01-25-023530") && realPhotoPass;
 realPhotoPass = check("expiry_date", realPhotoResult.variant_fields.expiry_date?.value, "2030/04/10") && realPhotoPass;
 
@@ -288,8 +288,8 @@ const specimenResult = extractFields(specimenLines, "DRIVERS_LICENSE", "FRONT", 
 console.log("\n=== Full end-to-end specimen test ===\n");
 let specimenPass = true;
 specimenPass = check("last_name", specimenResult.common_fields.last_name?.value, "DELA CRUZ") && specimenPass;
-specimenPass = check("first_name", specimenResult.common_fields.first_name?.value, "JUAN") && specimenPass;
-specimenPass = check("middle_name", specimenResult.common_fields.middle_name?.value, "PEDRO GARCIA") && specimenPass;
+specimenPass = check("first_name", specimenResult.common_fields.first_name?.value, "JUAN PEDRO") && specimenPass;
+specimenPass = check("middle_name", specimenResult.common_fields.middle_name?.value, "GARCIA") && specimenPass;
 specimenPass = check("sex", specimenResult.common_fields.sex?.value, "M") && specimenPass;
 specimenPass = check("date_of_birth", specimenResult.common_fields.date_of_birth?.value, "1987/10/04") && specimenPass;
 specimenPass = check("blood_type", specimenResult.common_fields.blood_type?.value, "O+") && specimenPass;

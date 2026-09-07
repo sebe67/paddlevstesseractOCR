@@ -475,6 +475,12 @@ function splitCompoundIdExpiry(lines: RecognizedTextLine[], variant: Record<stri
  * matching above has found it. The split parts share the whole line's bounding box -
  * there's no way to recover individual boxes for words that were never detected as
  * separate lines in the first place.
+ *
+ * The part after the comma is split from the END, not the start: Philippine naming
+ * convention has the middle name as a single word (customarily the mother's maiden
+ * surname), while the given name itself can be more than one word (e.g. "Juan Pedro")
+ * - so the last word is the middle name and everything before it is the first name,
+ * not the other way around.
  */
 function splitCommaSeparatedName(common: Record<string, OcrField | undefined>): void {
   const current = common.last_name;
@@ -483,15 +489,17 @@ function splitCommaSeparatedName(common: Record<string, OcrField | undefined>): 
   const [lastPart, restPart] = current.value.split(",").map((s) => s.trim());
   if (!lastPart || !restPart) return;
 
-  const [firstWord, ...middleWords] = restPart.split(/\s+/).filter(Boolean);
-  if (!firstWord) return;
+  const words = restPart.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return;
+  const middleWord = words.length > 1 ? words[words.length - 1] : undefined;
+  const firstWords = middleWord ? words.slice(0, -1) : words;
 
   common.last_name = { ...current, value: lastPart };
   if (!common.first_name?.value) {
-    common.first_name = { ...current, value: firstWord };
+    common.first_name = { ...current, value: firstWords.join(" ") };
   }
-  if (middleWords.length > 0 && !common.middle_name?.value) {
-    common.middle_name = { ...current, value: middleWords.join(" ") };
+  if (middleWord && !common.middle_name?.value) {
+    common.middle_name = { ...current, value: middleWord };
   }
 }
 

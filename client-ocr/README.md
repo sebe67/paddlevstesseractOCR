@@ -45,11 +45,15 @@ downloads of the model assets from a public GCS bucket.
   one comma-separated line ("DELA CRUZ, JUAN PEDRO GARCIA") — PH IDs' standard
   `"LASTNAME, FIRSTNAME MIDDLENAME"` format — which was being kept whole as `last_name`,
   leaving `first_name`/`middle_name` empty. Fixed with `splitCommaSeparatedName`, a
-  dedicated post-process step. This run also confirmed the position template
-  (`nationality`, `sex`, `date_of_birth`, `id_number`, `blood_type`,
-  `license_restrictions`) and the generic label/grid-row/plausibility logic all held up
-  together on a real, complete detection pass — not just each fix in isolation. Still
-  unvalidated: any id_type other than DRIVERS_LICENSE, and the BACK side.
+  dedicated post-process step; split from the *end* of the part after the comma, not the
+  start — Philippine naming convention has a single-word middle name (customarily the
+  mother's maiden surname) with the given name itself free to be more than one word, so
+  "JUAN PEDRO GARCIA" is first_name "JUAN PEDRO" + middle_name "GARCIA", not the other
+  way around. This run also confirmed the position template (`nationality`, `sex`,
+  `date_of_birth`, `id_number`, `blood_type`, `license_restrictions`) and the generic
+  label/grid-row/plausibility logic all held up together on a real, complete detection
+  pass — not just each fix in isolation. Still unvalidated: any id_type other than
+  DRIVERS_LICENSE, and the BACK side.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
