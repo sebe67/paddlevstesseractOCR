@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.10.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.11.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -114,9 +114,24 @@ downloads of the model assets from a public GCS bucket.
   label-matching left empty. Every field-extraction bug fixed across this file has the
   same shape for exactly that reason: label-matching finding *some* (wrong) value blocks
   the trustworthy, checksum-validated MRZ result from ever being used, whereas
-  label-matching correctly declining to guess lets MRZ take over as intended. Still
-  unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/SENIOR_CITIZEN/PWD, and
-  the BACK side of any type.
+  label-matching correctly declining to guess lets MRZ take over as intended.
+- **First real test of a non-DRIVERS_LICENSE/PASSPORT type: a real PWD ID photo**
+  turned up a genuinely new layout shape, not a variant of a bug already fixed:
+  `findValueNear` only ever searched to the right or *below* a label for its value,
+  because every layout tested so far put the label above the value. This PWD ID's
+  "NAME" and "TYPE OF DISABILITY" print the opposite way around - the real value sits
+  above a ruled line, with the label printed below it - so `pwd_disability_type`
+  resolved to "SIGNATURE" (the nearest thing below the label, further down the card)
+  instead of "PSYCHOSOCIAL", its real value directly above. Fixed by making the
+  above/below distance comparison symmetric: whichever direction the nearest
+  left-aligned candidate is actually in now wins, rather than only ever looking one way.
+  Open question this same card raised, not yet resolved: its "NAME" field prints one
+  undivided value ("JUAN DELA CRUZ", no comma) with no reliable cue for where the given
+  name ends and the surname begins - Filipino surnames are routinely compound ("DELA
+  CRUZ", "DE LOS SANTOS"), so a naive word-count split would be wrong as often as not.
+  Currently unaddressed (this field goes unresolved on this ID type) rather than guessed
+  at silently. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/
+  SENIOR_CITIZEN, and the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -132,7 +147,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with ten scenarios, each
+Pure logic test (no model, no browser, no network) with eleven scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -184,6 +199,10 @@ reproducing a real bug report:
     label fix) "Kasarian/Sex" label with no separately detected "F"/"M" character to
     find instead - purely because nothing checked whether "MANILA" was even shaped like
     a sex value.
+11. A real PWD ID photo - the first non-DRIVERS_LICENSE/PASSPORT type tested - whose
+    "TYPE OF DISABILITY" label sits *below* its value ("PSYCHOSOCIAL"), the opposite of
+    every layout tested so far; `findValueNear` only ever searched right or below a
+    label, so it resolved to "SIGNATURE" (the nearest thing below) instead.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
@@ -393,9 +412,11 @@ try {
    to label matching: each field's label aliases (English + Filipino) are matched
    against recognized lines — tolerating some recognition noise via edit-distance
    fuzzy matching (`fuzzyMatchPrefix`), not just an exact substring — and the value is
-   taken from the same line or the nearest line to the right/below, with the line's
-   bounding box attached, but only if that candidate actually looks like a plausible
-   value for the field: not itself just another field's label (`isLabelOnlyText`), and
+   taken from the same line or the nearest left-aligned line to the right, below, *or
+   above* the label (whichever direction the nearest candidate is actually in - some
+   layouts put the value above the label instead of below it), with the line's bounding
+   box attached, but only if that candidate actually looks like a plausible value for
+   the field: not itself just another field's label (`isLabelOnlyText`), and
    matching the field's expected shape where one exists (`FIELD_VALUE_VALIDATORS` —
    weight/height numeric, dates date-shaped). For fields whose value routinely wraps
    across more than one detected line (currently just `address`), `extendMultilineValue`

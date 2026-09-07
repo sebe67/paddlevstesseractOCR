@@ -205,8 +205,12 @@ interface Point2 {
 
 /**
  * Finds the nearest not-yet-used line that plausibly holds a label's value: either to
- * the right on the same row, or below and roughly left-aligned with the label (the
- * common ID-layout pattern where a label sits on its own line above the value).
+ * the right on the same row, or roughly left-aligned with the label and immediately
+ * above or below it. Most PH ID layouts put the label above the value, but some (e.g. a
+ * PWD ID's "NAME"/"TYPE OF DISABILITY" printed under a ruled line, with the actual value
+ * sitting above that line and the label below it) do the opposite - real bug report had
+ * "TYPE OF DISABILITY" resolve to "SIGNATURE", the nearest line below it, because
+ * nothing here ever looked upward for "PSYCHOSOCIAL", its real value directly above.
  */
 function findValueNear(
   labelLine: RecognizedTextLine,
@@ -221,8 +225,8 @@ function findValueNear(
   candidates.forEach((cand, idx) => {
     if (usedIndices.has(idx) || cand === labelLine || !isAcceptable(cand)) return;
     const c = boxCenter(cand.boundingBox);
-    // "Left-aligned with the label" (the below case) means the candidate's own LEFT edge
-    // starts where the label's left edge does - compare edge to edge, not the
+    // "Left-aligned with the label" (the above/below cases) means the candidate's own
+    // LEFT edge starts where the label's left edge does - compare edge to edge, not the
     // candidate's center to the label's edge. A real bug report had "Address"'s value
     // resolve to "AUTODEAL", a short unrelated line sitting in a totally different
     // column (near the ID photo placeholder) - its narrow box happened to have a center
@@ -231,14 +235,23 @@ function findValueNear(
     const leftAlignOffset = Math.abs(cand.boundingBox[0] - labelLine.boundingBox[0]);
     const sameRow = Math.abs(c.y - labelCenter.y) < labelHeight * 0.7;
     const toRight = c.x > labelLine.boundingBox[2] - 2;
-    const below = c.y > labelLine.boundingBox[3] - 2 && leftAlignOffset < labelHeight * 15;
 
-    if (!((sameRow && toRight) || below)) return;
+    if (sameRow && toRight) {
+      const dist = c.x - labelLine.boundingBox[2];
+      if (dist < 0) return;
+      if (!best || dist < best.dist) best = { line: cand, index: idx, dist };
+      return;
+    }
 
-    const dist =
-      sameRow && toRight ? c.x - labelLine.boundingBox[2] : (c.y - labelLine.boundingBox[3]) * 3 + leftAlignOffset;
-    if (dist < 0) return;
+    // Whichever of these is positive says which side the candidate is actually on; the
+    // other comes out negative and is discarded by taking the max, rather than needing
+    // a separate above/below branch.
+    const belowGap = c.y - labelLine.boundingBox[3];
+    const aboveGap = labelLine.boundingBox[1] - c.y;
+    const verticalGap = Math.max(belowGap, aboveGap);
+    if (verticalGap < -2 || leftAlignOffset >= labelHeight * 15) return;
 
+    const dist = verticalGap * 3 + leftAlignOffset;
     if (!best || dist < best.dist) best = { line: cand, index: idx, dist };
   });
 

@@ -468,4 +468,34 @@ if (!sexShapePass) {
 }
 
 allPass = allPass && sexShapePass;
+
+// === Value-above-label test (real PWD ID bug report) ===
+// Most PH ID layouts print the label above the value; a PWD ID's "NAME" and "TYPE OF
+// DISABILITY" print the opposite way around - the real value sits above a ruled line,
+// with the label printed below that line. findValueNear previously only ever searched
+// right or below a label, so "TYPE OF DISABILITY" found "SIGNATURE" (the nearest thing
+// below it, further down the card) instead of "PSYCHOSOCIAL", its real value directly
+// above. Real boxes from that report.
+const valueAboveLabelLines = [
+  line("JUAN DELA CRUZ", [260.49484536082474, 281.24876220835597, 655.5051546391752, 320.1788693705914]),
+  line("NAME", [399.7738095238095, 339.0752613956767, 516.2261904761904, 372.7915149201128]),
+  line("PSYCHOSOCIAL", [282.8078431372549, 383.3514125386997, 629.192156862745, 418.9956269349845]),
+  line("TYPE OF DISABILITY", [265.020023557126, 441.443913311326, 648.3133097762072, 474.00345510972664]),
+  line("SIGNATURE", [347.9506172839506, 557.4688109161793, 569.3827160493827, 589.5015838206629]),
+];
+const valueAboveLabelResult = extractFields(valueAboveLabelLines, "PWD", "FRONT");
+
+console.log("\n=== Value-above-label test (real PWD ID bug report) ===\n");
+const valueAboveLabelPass = check(
+  "pwd_disability_type",
+  valueAboveLabelResult.variant_fields.pwd_disability_type?.value,
+  "PSYCHOSOCIAL"
+);
+
+console.log(`\n${valueAboveLabelPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!valueAboveLabelPass) {
+  console.log("\nFull output:", JSON.stringify(valueAboveLabelResult, null, 2));
+}
+
+allPass = allPass && valueAboveLabelPass;
 process.exit(allPass ? 0 : 1);
