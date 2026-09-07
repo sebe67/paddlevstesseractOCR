@@ -159,4 +159,69 @@ if (!realPhotoPass) {
 }
 
 allPass = allPass && realPhotoPass;
+
+// === Implausible-value rejection test ===
+// A third real run of the same specimen card (after the fixes above) came back with
+// three fields resolved to values that were simply the nearest unused line, with nothing
+// checking whether they looked anything like a plausible value: last_name resolved to
+// the text "Nationality" (another field's own label - real box confirmed in that
+// report), weight resolved to the address placeholder line ("UNIT/HOUSE NO.BUILDING,
+// STREET NAME,"), and expiry_date resolved to a single stray character ("h"). Each
+// scenario places the wrong-but-nearer candidate closer to the label than the real
+// value, so a pass proves the value is rejected on its own merits, not just losing a
+// distance tiebreak. Run as three separate extractFields() calls, each with its own
+// `lines` array - not one combined array like the scenarios above - because "Nationality"
+// (used here to test last_name's rejection of it) is itself a real label for the actual
+// nationality field, and having all three cases share one array let the nationality
+// field, quietly resolving in the background, scavenge "70" as its own value.
+function checkImplausible(name, testLines, field, target, expected) {
+  const result = extractFields(testLines, "DRIVERS_LICENSE", "FRONT");
+  const actual = target === "common" ? result.common_fields[field]?.value : result.variant_fields[field]?.value;
+  const ok = check(name, actual, expected);
+  if (!ok) console.log("  Full output:", JSON.stringify(result, null, 2));
+  return ok;
+}
+
+console.log("\n=== Implausible-value rejection test ===\n");
+let implausibleValuePass = true;
+implausibleValuePass =
+  checkImplausible(
+    "last_name",
+    [
+      line("Last Name. First Name.Middle Name", [50, 60, 500, 78]),
+      line("Nationality", [218.4600802854594, 165.9444263363755, 278.9083407671722, 181.96422750977837]), // real wrong-candidate box
+      line("DELA CRUZ, JUAN PEDRO GARCIA", [50, 190, 400, 208]), // farther below, but the real value
+    ],
+    "last_name",
+    "common",
+    "DELA CRUZ, JUAN PEDRO GARCIA"
+  ) && implausibleValuePass;
+implausibleValuePass =
+  checkImplausible(
+    "weight",
+    [
+      line("Weight(kg)", [433, 400, 510, 418]),
+      line("UNIT/HOUSE NO.BUILDING, STREET NAME,", [433, 430, 700, 448]), // closer, but not numeric
+      line("70", [433, 460, 460, 478]), // farther, but the real value
+    ],
+    "weight",
+    "variant",
+    "70"
+  ) && implausibleValuePass;
+implausibleValuePass =
+  checkImplausible(
+    "expiry_date",
+    [
+      line("Expiration Date", [433, 500, 560, 518]),
+      line("h", [433, 530, 450, 548]), // closer, but not date-shaped
+      line("2022/10/04", [433, 560, 513, 578]), // farther, but the real value
+    ],
+    "expiry_date",
+    "variant",
+    "2022/10/04"
+  ) && implausibleValuePass;
+
+console.log(`\n${implausibleValuePass ? "ALL PASSED" : "SOME FAILED"}`);
+
+allPass = allPass && implausibleValuePass;
 process.exit(allPass ? 0 : 1);

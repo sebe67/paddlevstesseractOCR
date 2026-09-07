@@ -31,8 +31,17 @@ downloads of the model assets from a public GCS bucket.
   grid-row matcher's rank-based label/value pairing — now paired by nearest column
   instead; and the text detector fusing two adjacent cells (License No. + Expiration
   Date) into one OCR line — recovered by pattern-matching the fused shape directly in
-  `splitCompoundIdExpiry`. Still unvalidated: any id_type other than DRIVERS_LICENSE, and
-  the BACK side.
+  `splitCompoundIdExpiry`. A later run of the same card surfaced a different class of
+  bug: fields resolving to whatever unused line was geometrically nearest, with nothing
+  checking whether it was a *plausible* value at all — `last_name` resolved to the text
+  "Nationality" (literally another field's own label), `weight` resolved to an address
+  placeholder line, `expiry_date` resolved to a single stray character. Fixed with two
+  general checks in `fieldExtraction.ts`: `isLabelOnlyText` rejects a candidate that's
+  itself, in full, some other field's label, and `FIELD_VALUE_VALIDATORS` rejects a
+  candidate that doesn't even look like the right shape (weight/height must be numeric,
+  dates must look date-shaped) before accepting it — trying the next-nearest candidate
+  instead of settling for a bad one. Still unvalidated: any id_type other than
+  DRIVERS_LICENSE, and the BACK side.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -48,7 +57,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with three scenarios, each
+Pure logic test (no model, no browser, no network) with four scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -66,6 +75,10 @@ reproducing a real bug report:
    the row (breaks rank-based label/value pairing if not paired by nearest column
    instead), and two adjacent cells (License No. + Expiration Date) fused into one OCR
    line by the text detector.
+4. A third run of the same card resolving fields to whatever unused line was nearest,
+   without checking whether it was even a plausible value: `last_name` grabbing the
+   literal text "Nationality" (another field's own label), `weight` grabbing an address
+   placeholder line, `expiry_date` grabbing a single stray character.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
@@ -153,6 +166,15 @@ produce output; if that step isn't done yet, the page still loads, but OCR calls
 fail with a fetch error naming the model URL that couldn't be reached — which itself
 confirms whether bucket access is the problem. See `example/main.ts` for the ~20 lines
 of wiring it takes.
+
+The printed JSON also includes a `debug_lines` key (not part of the real
+`ph-id-schema` payload — `mergeIdOcrResults` doesn't produce it, the demo adds it on
+top) with every text line the detector found on each side, label lines included, each
+with its own bounding box. If a field comes out wrong, include this in a bug report
+alongside the rest of the output: the box on just the one wrong value is often not
+enough to tell whether the bug is in label matching, position, or something else, and
+guessing at other lines' positions from context (as several fixes so far had to)
+is a lot less reliable than having the real ones.
 
 ## Usage
 
@@ -267,11 +289,15 @@ try {
    against recognized lines — tolerating some recognition noise via edit-distance
    fuzzy matching (`fuzzyMatchPrefix`), not just an exact substring — and the value is
    taken from the same line or the nearest line to the right/below, with the line's
-   bounding box attached. Rows of short labels with a value row below them are matched
-   by nearest column, not left-to-right rank, so one label in the row failing to match
-   at all doesn't shift every field after it onto the wrong value. A pattern-based pass
-   (`splitCompoundIdExpiry`) also recovers `id_number`/`expiry_date` when the text
-   detector fuses their two cells into one OCR line. For `PASSPORT`, also parses the
+   bounding box attached, but only if that candidate actually looks like a plausible
+   value for the field: not itself just another field's label (`isLabelOnlyText`), and
+   matching the field's expected shape where one exists (`FIELD_VALUE_VALIDATORS` —
+   weight/height numeric, dates date-shaped). Rows of short labels with a value row
+   below them are matched by nearest column, not left-to-right rank, so one label in
+   the row failing to match at all doesn't shift every field after it onto the wrong
+   value. A pattern-based pass (`splitCompoundIdExpiry`) also recovers
+   `id_number`/`expiry_date` when the text detector fuses their two cells into one OCR
+   line. For `PASSPORT`, also parses the
    TD3 MRZ and uses it (checksum-validated) to fill in anything template/label-matching
    missed.
 

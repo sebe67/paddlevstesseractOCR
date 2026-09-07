@@ -113,6 +113,44 @@ function isKnownLabelText(text: string, allAliasLists: string[][]): boolean {
   return allAliasLists.some((aliases) => aliases.some((alias) => fuzzyMatchPrefix(norm, normalize(alias)).matched));
 }
 
+/**
+ * True if `text` is, on its own, entirely and only some known field's label - nothing
+ * left over (unlike isKnownLabelText above, which also counts a label that's merely a
+ * *prefix* of a longer line). Used to stop a nearby-line search (findValueNear,
+ * resolveGridRows) from accepting a candidate that's obviously not a value at all: a real
+ * bug report had "Last Name"'s value resolve to the text "Nationality" - the nearest
+ * unused line below it - purely because nothing checked whether that candidate was
+ * itself just another field's label.
+ */
+function isLabelOnlyText(text: string, allAliasLists: string[][]): boolean {
+  const norm = normalize(text);
+  if (!norm) return false;
+  return allAliasLists.some((aliases) =>
+    aliases.some((alias) => {
+      const { matched, matchedLength } = fuzzyMatchPrefix(norm, normalize(alias));
+      return matched && matchedLength >= norm.length;
+    })
+  );
+}
+
+// A value that plainly isn't the right shape for its field is worse than no value at all
+// - a bug report had "weight" resolve to an address placeholder line ("UNIT/HOUSE
+// NO.BUILDING, STREET NAME,") and "expiry_date" resolve to a single stray character
+// ("h"), both just because they were the nearest unused line, with nothing checking
+// whether they looked anything like a weight or a date. Intentionally loose (a real OCR
+// value can still have noise) - this only screens out candidates that couldn't possibly
+// be right, not ones that merely look unusual.
+const NUMERIC_VALUE_PATTERN = /^\d+(\.\d+)?\s*[a-zA-Z]{0,3}$/;
+const DATE_VALUE_PATTERN = /\d{2,4}[/\-.]\d{1,2}[/\-.]\d{1,4}/;
+
+const FIELD_VALUE_VALIDATORS: Partial<Record<string, (text: string) => boolean>> = {
+  weight: (text) => NUMERIC_VALUE_PATTERN.test(text.trim()),
+  height: (text) => NUMERIC_VALUE_PATTERN.test(text.trim()),
+  date_of_birth: (text) => DATE_VALUE_PATTERN.test(text),
+  issue_date: (text) => DATE_VALUE_PATTERN.test(text),
+  expiry_date: (text) => DATE_VALUE_PATTERN.test(text),
+};
+
 /** If `lineText` starts with (or closely resembles the start of) one of `aliases` as a label, returns what's left after stripping it. */
 function matchLabel(
   lineText: string,
@@ -151,14 +189,15 @@ interface Point2 {
 function findValueNear(
   labelLine: RecognizedTextLine,
   candidates: RecognizedTextLine[],
-  usedIndices: Set<number>
+  usedIndices: Set<number>,
+  isAcceptable: (line: RecognizedTextLine) => boolean = () => true
 ): { line: RecognizedTextLine; index: number } | undefined {
   const labelCenter = boxCenter(labelLine.boundingBox);
   const labelHeight = labelLine.boundingBox[3] - labelLine.boundingBox[1];
   let best: { line: RecognizedTextLine; index: number; dist: number } | undefined;
 
   candidates.forEach((cand, idx) => {
-    if (usedIndices.has(idx) || cand === labelLine) return;
+    if (usedIndices.has(idx) || cand === labelLine || !isAcceptable(cand)) return;
     const c = boxCenter(cand.boundingBox);
     const sameRow = Math.abs(c.y - labelCenter.y) < labelHeight * 0.7;
     const toRight = c.x > labelLine.boundingBox[2] - 2;
@@ -267,7 +306,13 @@ function findLabelOnlyHits(lines: RecognizedTextLine[], used: Set<number>, field
  * so on) - the same left-to-right correspondence a human reads the row with, rather
  * than per-field nearest-distance search.
  */
-function resolveGridRows(lines: RecognizedTextLine[], used: Set<number>, fieldTargets: FieldTarget[], side: DocumentSide): void {
+function resolveGridRows(
+  lines: RecognizedTextLine[],
+  used: Set<number>,
+  fieldTargets: FieldTarget[],
+  side: DocumentSide,
+  allAliasLists: string[][]
+): void {
   const labelHits = findLabelOnlyHits(lines, used, fieldTargets);
   if (labelHits.length < 2) return;
 
@@ -283,7 +328,9 @@ function resolveGridRows(lines: RecognizedTextLine[], used: Set<number>, fieldTa
 
     const belowCandidates: number[] = [];
     for (let i = 0; i < lines.length; i++) {
-      if (used.has(i) || hitsByLine.has(i)) continue; // skip already-used lines and other labels
+      // skip already-used lines, other labels, and lines that are themselves clearly
+      // some other field's label rather than a value (see isLabelOnlyText's comment)
+      if (used.has(i) || hitsByLine.has(i) || isLabelOnlyText(lines[i].text, allAliasLists)) continue;
       const top = lines[i].boundingBox[1];
       if (top > rowBottom - 2 && top < rowBottom + rowHeight * 5) belowCandidates.push(i);
     }
@@ -305,10 +352,12 @@ function resolveGridRows(lines: RecognizedTextLine[], used: Set<number>, fieldTa
       const hit = hitsByLine.get(labelIdx)!;
       if (hit.target[hit.field]) continue;
       const labelCx = (lines[labelIdx].boundingBox[0] + lines[labelIdx].boundingBox[2]) / 2;
+      const validator = FIELD_VALUE_VALIDATORS[hit.field];
 
       let bestValueIdx: number | undefined;
       let bestDist = Infinity;
       for (const valueIdx of valueRemaining) {
+        if (validator && !validator(lines[valueIdx].text)) continue;
         const valueCx = (lines[valueIdx].boundingBox[0] + lines[valueIdx].boundingBox[2]) / 2;
         const dist = Math.abs(valueCx - labelCx);
         if (dist < bestDist) {
@@ -449,25 +498,29 @@ export function extractFields(
       .filter((f): f is FieldTarget => Boolean(f.aliases)),
   ];
 
-  resolveFromTemplate(lines, used, fieldTargets, idType, side, imageSize);
-  resolveGridRows(lines, used, fieldTargets, side);
-
   const allAliasLists = fieldTargets.map((f) => f.aliases);
+
+  resolveFromTemplate(lines, used, fieldTargets, idType, side, imageSize);
+  resolveGridRows(lines, used, fieldTargets, side, allAliasLists);
 
   function assign(target: Record<string, OcrField | undefined>, field: string, aliases: string[]) {
     if (target[field]) return; // already resolved by resolveGridRows
+    const validator = FIELD_VALUE_VALIDATORS[field];
+    const isAcceptableValue = (l: RecognizedTextLine) =>
+      !isLabelOnlyText(l.text, allAliasLists) && (!validator || validator(l.text));
+
     for (let i = 0; i < lines.length; i++) {
       if (used.has(i)) continue;
       const { matched, remainder } = matchLabel(lines[i].text, aliases, allAliasLists);
       if (!matched) continue;
 
-      if (remainder.length >= 1) {
+      if (remainder.length >= 1 && isAcceptableValue({ text: remainder, confidence: lines[i].confidence, boundingBox: lines[i].boundingBox })) {
         used.add(i);
         target[field] = toOcrField(remainder, lines[i].confidence, lines[i].boundingBox, side);
         return;
       }
 
-      const found = findValueNear(lines[i], lines, used);
+      const found = findValueNear(lines[i], lines, used, isAcceptableValue);
       if (found) {
         used.add(i);
         used.add(found.index);
