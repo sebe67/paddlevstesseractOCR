@@ -1,4 +1,6 @@
-import { configureOrtWasmPaths, runIdOcr, mergeIdOcrResults } from "../src/index";
+import { configureOrtWasmPaths, runIdOcr, mergeIdOcrResults, LIBRARY_VERSION } from "../src/index";
+
+document.querySelector<HTMLElement>("#version")!.textContent = `v${LIBRARY_VERSION}`;
 
 // onnxruntime-web's wasm binaries, served from a CDN for this example so it runs with
 // zero extra setup. In your real app, host these yourself instead (README setup step 2)

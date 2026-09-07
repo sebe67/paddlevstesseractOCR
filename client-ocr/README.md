@@ -1,5 +1,12 @@
 # id-ocr-web
 
+**Version: 1.10.0** (`package.json`'s `version`, also shown in the demo page's header
+and folded into every result's `document_provenance[].engine_version`) — bumped on every
+push with a meaningful field-extraction change, so a bug report or a screenshot of the
+demo can be tied to the exact code that produced it. `src/version.ts` is the source of
+truth; keep it and `package.json` in sync by hand when bumping (no build step wires them
+together).
+
 Client-side (browser) OCR + field extraction for Philippine ID scans. Runs entirely
 on-device via [`onnxruntime-web`](https://github.com/microsoft/onnxruntime) (WASM
 backend) using genuine PaddleOCR PP-OCRv5 mobile detection/recognition models — the

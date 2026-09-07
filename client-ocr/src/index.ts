@@ -17,8 +17,9 @@ import type {
   RequiredCommonFields,
   VariantFields,
 } from "./types";
+import { LIBRARY_VERSION } from "./version";
 
-const ENGINE_VERSION = "id-ocr-web/ppocrv5-mobile-onnxruntime-web@1.0.0";
+const ENGINE_VERSION = `id-ocr-web@${LIBRARY_VERSION} (ppocrv5-mobile/onnxruntime-web)`;
 const REC_LINE_HEIGHT = 48;
 
 /** Point onnxruntime-web at wherever you host its .wasm binaries (npm package's dist/, or a CDN). Call once at app startup. */
@@ -187,3 +188,4 @@ export type {
 export { ID_TEMPLATES } from "./idTemplates";
 export type { IdTemplate, TemplateRegion } from "./idTemplates";
 export type { ImageSize } from "./fieldExtraction";
+export { LIBRARY_VERSION } from "./version";
