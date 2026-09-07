@@ -73,8 +73,8 @@ const SHORT_ALIAS_MAX_LENGTH = 6;
  * label, so the caller can slice off exactly that much rather than assuming it's
  * `alias.length`.
  */
-function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matchedLength: number } {
-  if (text.startsWith(alias)) return { matched: true, matchedLength: alias.length };
+function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matchedLength: number; exact: boolean } {
+  if (text.startsWith(alias)) return { matched: true, matchedLength: alias.length, exact: true };
 
   const threshold = Math.max(1, Math.round(alias.length * FUZZY_EDIT_RATIO));
   // Short aliases (a single short word, like "sex") are only ever compared at their own
@@ -94,8 +94,8 @@ function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matc
     const dist = levenshtein(text.slice(0, len), alias);
     if (!best || dist < best.dist) best = { len, dist };
   }
-  if (best && best.dist <= threshold) return { matched: true, matchedLength: best.len };
-  return { matched: false, matchedLength: 0 };
+  if (best && best.dist <= threshold) return { matched: true, matchedLength: best.len, exact: false };
+  return { matched: false, matchedLength: 0, exact: false };
 }
 
 /**
@@ -160,9 +160,18 @@ function matchLabel(
   const norm = normalize(lineText);
   for (const alias of aliases) {
     const a = normalize(alias);
-    const { matched, matchedLength } = fuzzyMatchPrefix(norm, a);
+    const { matched, matchedLength, exact } = fuzzyMatchPrefix(norm, a);
     if (!matched) continue;
     if (matchedLength >= norm.length) return { matched: true, remainder: "" };
+    // A fuzzy (non-exact) match that leaves real leftover text isn't trustworthy enough
+    // to treat that leftover as a value - a real bug report had "sex" match the first 3
+    // characters of "SEBASTIAN VINCENT PABLO" ("seb", edit-distance 1 from "sex") and
+    // "id no" match the first 5 of "15 NOV 2022" ("15 NO", edit-distance 2), both
+    // producing garbage remainders ("ASTIAN VINCENT PABLO", "V 2022"). Only an exact
+    // substring match (e.g. "Sex: F", "Weight(kg)") is reliable enough for that; a fuzzy
+    // match is only trusted when it consumes the *whole* line (handled above), where
+    // there's no leftover to get wrong.
+    if (!exact) continue;
     const remainder = lineText.slice(matchedLength).replace(/^[\s:.\-]+/, "").trim();
     if (UNIT_ANNOTATION_PATTERN.test(remainder) || isKnownLabelText(remainder, allAliasLists)) {
       return { matched: true, remainder: "" };

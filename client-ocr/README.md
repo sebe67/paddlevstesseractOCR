@@ -52,8 +52,20 @@ downloads of the model assets from a public GCS bucket.
   way around. This run also confirmed the position template (`nationality`, `sex`,
   `date_of_birth`, `id_number`, `blood_type`, `license_restrictions`) and the generic
   label/grid-row/plausibility logic all held up together on a real, complete detection
-  pass — not just each fix in isolation. Still unvalidated: any id_type other than
-  DRIVERS_LICENSE, and the BACK side.
+  pass — not just each fix in isolation.
+- **Also tested against a real PASSPORT photo** — surfaced a bug in the DRIVERS_LICENSE
+  fixes above: they live in `fieldExtraction.ts`, shared by every `id_type`, and a fuzzy
+  match that leaves real leftover text isn't automatically trustworthy just because it
+  came from a *short* alias. `sex` matched the first 3 characters of "SEBASTIAN VINCENT
+  PABLO" ("seb", edit-distance 1 from "sex") and took the rest as its value
+  ("ASTIAN VINCENT PABLO"); `id_number` did the same against "15 NOV 2022" via "id no"
+  ("15 NO", edit-distance 2, leaving "V 2022"). Fixed by only ever trusting a *fuzzy*
+  (non-exact) label match when it consumes the entire line — the same mechanism that
+  correctly handles a wholly garbled label like "SRX" already does that; the bug was in
+  also allowing a fuzzy match to explain away part of a much longer, unrelated line as
+  "label + leftover value". An exact substring match (e.g. "Sex: F") still works as
+  before. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/
+  SENIOR_CITIZEN/PWD, and the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -69,7 +81,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with five scenarios, each
+Pure logic test (no model, no browser, no network) with six scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -96,6 +108,11 @@ reproducing a real bug report:
    one comma-separated line, `"LASTNAME, FIRSTNAME MIDDLENAME"`, that needs splitting
    into `last_name`/`first_name`/`middle_name` rather than being kept whole as
    `last_name` with `first_name` left empty.
+6. A real PASSPORT photo, proving the DRIVERS_LICENSE fixes above didn't break a
+   different `id_type` sharing the same code: a fuzzy match from a short alias ("sex",
+   "id no") coincidentally matching the first few characters of an unrelated, much
+   longer line and treating the rest as its value ("SEBASTIAN VINCENT PABLO" → sex =
+   "ASTIAN VINCENT PABLO"; "15 NOV 2022" → id_number = "V 2022").
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

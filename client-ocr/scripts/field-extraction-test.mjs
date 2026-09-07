@@ -307,4 +307,53 @@ if (!specimenPass) {
 }
 
 allPass = allPass && specimenPass;
+
+// === Short-alias false-positive test (real PASSPORT bug report) ===
+// The driver's-license fixes above live in fieldExtraction.ts, which every id_type
+// shares - so they also apply (and can also break things) for PASSPORT. A real run
+// against a passport photo came back with sex = "ASTIAN VINCENT PABLO" (literally
+// "SEBASTIAN VINCENT PABLO" with "SEB" sliced off the front) and id_number = "V 2022"
+// (literally "15 NOV 2022" with "15 NO" sliced off). Both are the same root cause: the
+// short alias "sex" fuzzy-matched the first 3 characters of "SEBASTIAN..." ("seb",
+// edit-distance 1), and "id no" fuzzy-matched the first 5 characters of "15 NOV 2022"
+// ("15 NO", edit-distance 2) - in both cases treating a real, unrelated line's prefix as
+// the label and everything after it as the value. Passports have no printed "Sex"/
+// "ID No" labels in this layout (those fields normally come from MRZ parsing, a
+// separate step not exercised here) - lines from the real debug_lines dump for this
+// report, so a pass here means sex/id_number are correctly left unresolved rather than
+// populated with garbage that would silently block the MRZ fallback (which only fills
+// in fields still empty).
+const passportLines = [
+  line("REPUBUIKA NG PILIPINASREPUBLICOFTHE PHILIPPINESO", [52.062284902924404, 246.88919941615688, 336.0610571382968, 260.8166931135134]),
+  line("PASAPORTE/", [49.51388888888889, 260.6666666666667, 94.23611111111111, 272.3333333333333]),
+  line("PASSPONT", [56.91263440860216, 269.38709677419354, 87.79569892473118, 278.61290322580646]),
+  line("p ", [119.71438172043011, 260.9193548387097, 149.57728494623657, 281.0806451612903]),
+  line("PHL", [156.54656862745097, 268.3529411764706, 173.1200980392157, 278.6470588235294]),
+  line("P2370563C", [235.33580508474577, 269.56779661016947, 293.6641949152542, 281.43220338983053]),
+  line("STLVA", [121.60919540229887, 286.8965517241379, 150.55747126436782, 298.1034482758621]),
+  line("SEBASTIAN VINCENT PABLO", [122.10149572649573, 305.4102564102564, 236.31517094017096, 317.5897435897436]),
+  line("QUE", [122.94618055555556, 326.2916666666667, 140.59548611111111, 336.7083333333333]),
+  line("10 APR 2008", [122.28694968553461, 343.60377358490564, 174.79638364779873, 355.39622641509436]),
+  line("FILIPINO", [214.3861788617886, 343.7073170731707, 255.19715447154468, 355.2926829268293]),
+  line("PASIG CITY", [163.1421568627451, 363.2352941176471, 213.4828431372549, 372.7647058823529]),
+  line("15 NOV 2022", [122.30024509803923, 381.61764705882354, 172.86642156862746, 393.38235294117646]),
+  line("K NOV 2027", [122.9013605442177, 401.2448979591837, 171.30697278911566, 410.7551020408163]),
+  line("DFA NANILA", [213.92948717948718, 401.2307692307692, 265.23717948717945, 410.7692307692308]),
+  line("P<PHLSILVA<<SEBASTIAN<VINCENT<PABLO<<<<<<<<<", [29.128755266851176, 422.7087953405206, 331.2025431549567, 437.0109177154335]),
+  line("P2370563C1PHL0804105M2711140<<<<<<<<<<<<<<08", [28.888969090863995, 439.95827390503746, 331.44433522404904, 454.0339441116166]),
+];
+
+const passportResult = extractFields(passportLines, "PASSPORT", "FRONT");
+
+console.log("\n=== Short-alias false-positive test (real PASSPORT bug report) ===\n");
+let passportPass = true;
+passportPass = check("sex", passportResult.common_fields.sex?.value, undefined) && passportPass;
+passportPass = check("id_number", passportResult.variant_fields.id_number?.value, undefined) && passportPass;
+
+console.log(`\n${passportPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!passportPass) {
+  console.log("\nFull output:", JSON.stringify(passportResult, null, 2));
+}
+
+allPass = allPass && passportPass;
 process.exit(allPass ? 0 : 1);
