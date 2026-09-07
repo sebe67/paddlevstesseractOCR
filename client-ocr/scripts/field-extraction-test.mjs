@@ -110,4 +110,53 @@ if (!templatePass) {
 }
 
 allPass = allPass && templatePass;
+
+// === Real-photo regression test ===
+// A second, real driver's-license photo (not the specimen) came back with several
+// fields still wrong or empty: "Sex" OCR'd as "SRX", "Date of Birth" as "Date af
+// Birth", the merged name label as "Last Name.Fint Nama.Middie Name" (worse than the
+// specimen's version - the remainder no longer even starts with a clean "First Name"),
+// and the License No./Expiration Date values fused by the text detector into one line,
+// "N01-25-0235302030/04/10", instead of two. All of this is the real misread text from
+// that report's raw_ocr_text; the bounding boxes are representative placements in the
+// same row/column shape (this report only included field-level boxes for whichever line
+// each field wrongly grabbed, not a full per-line box dump), since what's being tested
+// here is the fuzzy label matching, nearest-column grid pairing, and the compound-value
+// split, not position. "Nationality"'s label was garbled past recovery too, down to just
+// "Ma" - included here unmatched, on purpose: its value ("PHL") still sits in the value
+// row even though its own label never resolves to a field, which is exactly the case
+// that broke rank-based label/value pairing (see resolveGridRows's nearest-column
+// comment) before this fix.
+const realPhotoLines = [
+  line("Last Name.Fint Nama.Middie Name", [50, 60, 500, 78]),
+  line("SILVA, SEBASTIAN VINCENT PABLO QUE", [50, 90, 400, 108]),
+
+  line("Ma", [200, 130, 230, 148]),
+  line("SRX", [240, 130, 270, 148]),
+  line("Date af Birth", [280, 130, 410, 148]),
+  line("PHL", [206, 160, 236, 178]),
+  line("M", [246, 160, 264, 178]),
+  line("2008/04/10", [286, 160, 366, 178]),
+
+  line("N01-25-0235302030/04/10", [200, 300, 450, 318]),
+];
+
+const realPhotoResult = extractFields(realPhotoLines, "DRIVERS_LICENSE", "FRONT");
+
+console.log("\n=== Real-photo regression test (garbled labels + fused id/expiry line) ===\n");
+let realPhotoPass = true;
+realPhotoPass = check("sex", realPhotoResult.common_fields.sex?.value, "M") && realPhotoPass;
+realPhotoPass = check("date_of_birth", realPhotoResult.common_fields.date_of_birth?.value, "2008/04/10") && realPhotoPass;
+realPhotoPass =
+  check("last_name", realPhotoResult.common_fields.last_name?.value, "SILVA, SEBASTIAN VINCENT PABLO QUE") &&
+  realPhotoPass;
+realPhotoPass = check("id_number", realPhotoResult.variant_fields.id_number?.value, "N01-25-023530") && realPhotoPass;
+realPhotoPass = check("expiry_date", realPhotoResult.variant_fields.expiry_date?.value, "2030/04/10") && realPhotoPass;
+
+console.log(`\n${realPhotoPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!realPhotoPass) {
+  console.log("\nFull output:", JSON.stringify(realPhotoResult, null, 2));
+}
+
+allPass = allPass && realPhotoPass;
 process.exit(allPass ? 0 : 1);

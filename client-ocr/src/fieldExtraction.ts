@@ -34,21 +34,86 @@ export function detectIdType(lines: RecognizedTextLine[]): IdType | undefined {
 // this. Without this check that remainder gets accepted as the field's value outright.
 const UNIT_ANNOTATION_PATTERN = /^\([a-zA-Z°]{1,6}\)$/;
 
+function levenshtein(a: string, b: string): number {
+  const dp: number[][] = [];
+  for (let i = 0; i <= a.length; i++) dp.push(new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+// How much of an alias's characters may differ (proportionally, rounded, minimum 1) and
+// still count as the same label. Real-world recognition noise on this font/model garbles
+// labels character-by-character in ways an exact substring match can't survive - "Sex" ->
+// "SRX", "Date of Birth" -> "Date af Birth", "First Name" -> "Fint Nama" - all seen in a
+// real bug report. 30% is loose enough to catch that without being so loose it starts
+// matching unrelated short values (verified against real field values in this file's
+// regression test).
+const FUZZY_EDIT_RATIO = 0.3;
+
+// Aliases at or under this length only ever get compared at their own exact length (see
+// fuzzyMatchPrefix's comment) - long enough to still cover every short single-word alias
+// in idTypeAliases.ts ("sex", "weight", "height", "tin", "pin", "crn", "dob", "id no", ...).
+const SHORT_ALIAS_MAX_LENGTH = 6;
+
+/**
+ * Fuzzy prefix match: does `text` start with something close enough to `alias` to call it
+ * the same label? Tries exact match first (fast path), then - since a garbled label can
+ * come out a different length than the real one (a dropped or inserted character) - the
+ * edit distance from `alias` against several nearby prefix lengths of `text`, keeping
+ * whichever length scores lowest. Returns the length of `text` that was consumed as the
+ * label, so the caller can slice off exactly that much rather than assuming it's
+ * `alias.length`.
+ */
+function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matchedLength: number } {
+  if (text.startsWith(alias)) return { matched: true, matchedLength: alias.length };
+
+  const threshold = Math.max(1, Math.round(alias.length * FUZZY_EDIT_RATIO));
+  // Short aliases (a single short word, like "sex") are only ever compared at their own
+  // exact length. Letting them match a shorter text prefix too is what let "Expiration
+  // Date" collide with "sex": its first two characters, "ex", are edit-distance 1 from
+  // "sex" purely because both strings being compared are tiny, not because they mean the
+  // same thing. Longer, usually multi-word aliases get a wider length window, since
+  // recovering a real character drop (a missing OCR'd space, e.g. "Fint Nama.Middie Name"
+  // for "First Name.Middle Name") needs a text prefix shorter or longer than the alias's
+  // own length to line up correctly - and there the length difference is a much smaller
+  // fraction of the total, so the coincidental-match risk is proportionally far lower.
+  const isShortAlias = alias.length <= SHORT_ALIAS_MAX_LENGTH;
+  const lo = isShortAlias ? alias.length : Math.max(1, alias.length - 2);
+  const hi = isShortAlias ? alias.length : alias.length + 3;
+  let best: { len: number; dist: number } | undefined;
+  for (let len = lo; len <= Math.min(hi, text.length); len++) {
+    const dist = levenshtein(text.slice(0, len), alias);
+    if (!best || dist < best.dist) best = { len, dist };
+  }
+  if (best && best.dist <= threshold) return { matched: true, matchedLength: best.len };
+  return { matched: false, matchedLength: 0 };
+}
+
 /**
  * True if `text` is itself, on its own, nothing but a known field's label (i.e. would
  * match some field's aliases with an empty remainder). Used to catch merged-label OCR
  * lines like "Last Name. First Name.Middle Name", where stripping "Last Name" leaves
  * "First Name.Middle Name" - text that isn't a value at all, but another field's label
- * run together with a third label's leftover text. Without this check that remainder
- * gets accepted as the first field's value outright.
+ * (possibly itself garbled, e.g. "Fint Nama.Middie Name") run together with a third
+ * label's leftover text. Without this check that remainder gets accepted as the first
+ * field's value outright.
  */
 function isKnownLabelText(text: string, allAliasLists: string[][]): boolean {
   const norm = normalize(text);
   if (!norm) return false;
-  return allAliasLists.some((aliases) => aliases.some((alias) => norm.startsWith(normalize(alias))));
+  return allAliasLists.some((aliases) => aliases.some((alias) => fuzzyMatchPrefix(norm, normalize(alias)).matched));
 }
 
-/** If `lineText` starts with one of `aliases` (as a label), returns what's left after stripping it. */
+/** If `lineText` starts with (or closely resembles the start of) one of `aliases` as a label, returns what's left after stripping it. */
 function matchLabel(
   lineText: string,
   aliases: string[],
@@ -57,14 +122,14 @@ function matchLabel(
   const norm = normalize(lineText);
   for (const alias of aliases) {
     const a = normalize(alias);
-    if (norm === a) return { matched: true, remainder: "" };
-    if (norm.startsWith(a)) {
-      const remainder = lineText.slice(alias.length).replace(/^[\s:.\-]+/, "").trim();
-      if (UNIT_ANNOTATION_PATTERN.test(remainder) || isKnownLabelText(remainder, allAliasLists)) {
-        return { matched: true, remainder: "" };
-      }
-      return { matched: true, remainder };
+    const { matched, matchedLength } = fuzzyMatchPrefix(norm, a);
+    if (!matched) continue;
+    if (matchedLength >= norm.length) return { matched: true, remainder: "" };
+    const remainder = lineText.slice(matchedLength).replace(/^[\s:.\-]+/, "").trim();
+    if (UNIT_ANNOTATION_PATTERN.test(remainder) || isKnownLabelText(remainder, allAliasLists)) {
+      return { matched: true, remainder: "" };
     }
+    return { matched: true, remainder };
   }
   return { matched: false, remainder: "" };
 }
@@ -228,14 +293,36 @@ function resolveGridRows(lines: RecognizedTextLine[], used: Set<number>, fieldTa
     const valueRow = valueRows[0]; // nearest row below
     if (valueRow.length < 2) continue;
 
-    const pairCount = Math.min(labelRow.length, valueRow.length);
-    for (let k = 0; k < pairCount; k++) {
-      const hit = hitsByLine.get(labelRow[k])!;
+    // Pair by nearest x-center column, not by rank (label[k] <-> value[k]): if one label in
+    // the row wasn't recognized (garbled past even the fuzzy match, e.g. "Nationality"
+    // read as just "Ma"), its value is still sitting in the value row, and rank pairing
+    // would shift every label after it onto the wrong value. Matching each label to
+    // whichever remaining value column is horizontally closest survives that - the
+    // recognized labels still land on their own true values regardless of a gap earlier
+    // in the row.
+    const valueRemaining = new Set(valueRow);
+    for (const labelIdx of labelRow) {
+      const hit = hitsByLine.get(labelIdx)!;
       if (hit.target[hit.field]) continue;
-      const valueLine = lines[valueRow[k]];
+      const labelCx = (lines[labelIdx].boundingBox[0] + lines[labelIdx].boundingBox[2]) / 2;
+
+      let bestValueIdx: number | undefined;
+      let bestDist = Infinity;
+      for (const valueIdx of valueRemaining) {
+        const valueCx = (lines[valueIdx].boundingBox[0] + lines[valueIdx].boundingBox[2]) / 2;
+        const dist = Math.abs(valueCx - labelCx);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestValueIdx = valueIdx;
+        }
+      }
+      if (bestValueIdx === undefined) continue;
+
+      const valueLine = lines[bestValueIdx];
       hit.target[hit.field] = toOcrField(valueLine.text, valueLine.confidence, valueLine.boundingBox, side);
-      used.add(labelRow[k]);
-      used.add(valueRow[k]);
+      used.add(labelIdx);
+      used.add(bestValueIdx);
+      valueRemaining.delete(bestValueIdx);
     }
   }
 }
@@ -300,6 +387,35 @@ function resolveFromTemplate(
   }
 }
 
+// PH driver's license id_number ("N03-12-123456") immediately followed, with no
+// separator, by an expiry_date ("2022/10/04"). Seen in a real bug report where the
+// detector's box-merging (DB unclip pulling two close, same-row text boxes into one)
+// fused the id_number and expiry_date cells into a single OCR line - the two values
+// never existed as separate lines to match against, so no amount of label/position
+// matching over `lines` can recover them; only recognizing the fused shape itself can.
+const ID_NUMBER_PATTERN = /^[A-Z]\d{2}-\d{2}-\d{6}$/;
+const COMPOUND_ID_EXPIRY_PATTERN = /^([A-Z]\d{2}-\d{2}-\d{6})(\d{4}\/\d{2}\/\d{2})$/;
+
+/**
+ * Recovers id_number/expiry_date from a single fused OCR line matching the compound
+ * shape above (see its comment). Always trusts the split expiry_date over whatever's
+ * already there - a value that fits this exact fused shape is itself evidence the
+ * existing one is the same merged garbage - but only overwrites id_number if its current
+ * value doesn't already look like a clean id_number on its own (e.g. from the position
+ * template), since a template match is likely correct.
+ */
+function splitCompoundIdExpiry(lines: RecognizedTextLine[], variant: Record<string, OcrField | undefined>, side: DocumentSide): void {
+  for (const line of lines) {
+    const match = COMPOUND_ID_EXPIRY_PATTERN.exec(line.text.replace(/\s+/g, ""));
+    if (!match) continue;
+    variant.expiry_date = toOcrField(match[2], line.confidence, line.boundingBox, side);
+    if (!variant.id_number || !ID_NUMBER_PATTERN.test(variant.id_number.value)) {
+      variant.id_number = toOcrField(match[1], line.confidence, line.boundingBox, side);
+    }
+    return;
+  }
+}
+
 /**
  * Label-keyword + bounding-box heuristic field extractor. Three passes: first
  * resolveFromTemplate claims fields a known-good position template covers (see its doc
@@ -307,7 +423,9 @@ function resolveFromTemplate(
  * value row below (see its doc comment); then the remaining fields fall back to the
  * simpler per-field search - a line matching one of its label aliases, then the value
  * either from the rest of that same line (e.g. "Sex: F") or the nearest unused line to
- * its right/below (e.g. a solo label with the value printed underneath).
+ * its right/below (e.g. a solo label with the value printed underneath). Finally,
+ * splitCompoundIdExpiry recovers id_number/expiry_date from a fused detection box, when
+ * one of the fields those apply to is applicable to this id_type.
  */
 export function extractFields(
   lines: RecognizedTextLine[],
@@ -361,6 +479,10 @@ export function extractFields(
 
   for (const { target, field, aliases } of fieldTargets) {
     assign(target, field, aliases);
+  }
+
+  if (applicableVariantFields.includes("id_number") && applicableVariantFields.includes("expiry_date")) {
+    splitCompoundIdExpiry(lines, variantTarget, side);
   }
 
   return { common_fields: common, variant_fields: variant };

@@ -18,11 +18,21 @@ downloads of the model assets from a public GCS bucket.
   (see below) — correctly detected and decoded a test string with 0.985 confidence.
   That validates detection, the from-scratch DB post-processing geometry, cropping, and
   CTC decoding all at once, against the real deployed files, not a guess.
-- **What's still unvalidated**: real ID photos. The live check above uses a clean
-  rendered test string — perspective distortion, lower contrast/lighting, glare, and
-  the field-extraction/label-matching layer all still need a real scan, which this
-  environment doesn't have access to. `npm run example` against an actual ID is the
-  next real test.
+- **Tested against a real DRIVERS_LICENSE FRONT photo** (via `npm run example`, outside
+  this environment, which has no camera/browser). Recognition itself worked — every
+  wrong/missing field traced back to `fieldExtraction.ts`, not the det/rec models. Real
+  issues found and fixed: label text garbled character-by-character by recognition noise
+  ("Sex" → "SRX", "Date of Birth" → "Date af Birth", "First Name" → "Fint Nama") that
+  exact substring matching couldn't survive — now handled by fuzzy (edit-distance)
+  label matching; a label recognized well enough to *steal* a short field's match by
+  coincidence (see `fuzzyMatchPrefix`'s comment in `fieldExtraction.ts` for the "sex"
+  vs. "Expiration Date" false-positive this guards against); a label garbled past any
+  recovery ("Nationality" → "Ma") while its value stayed put in the row, which broke the
+  grid-row matcher's rank-based label/value pairing — now paired by nearest column
+  instead; and the text detector fusing two adjacent cells (License No. + Expiration
+  Date) into one OCR line — recovered by pattern-matching the fused shape directly in
+  `splitCompoundIdExpiry`. Still unvalidated: any id_type other than DRIVERS_LICENSE, and
+  the BACK side.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -38,18 +48,28 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) reproducing a real bug report:
-several short field labels printed in a row with a matching value row below (e.g.
-"Nationality / Sex / Date of Birth"), a label with an inline unit suffix ("Weight
-(kg)"), and a merged label line ("Last Name. First Name.Middle Name" — the
-"First Name" remainder left after stripping the "Last Name" prefix is itself another
-field's label, not a value). A second scenario in the same script exercises
-`idTemplates.ts`'s position-based matching directly against that bug report's real,
-unshifted coordinates with **no label lines present at all** — the actual failure
-mode, since the labels on that card were misread too badly for label-matching alone
-to ever fix. Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts`
-changes — worth running before trusting a change to the field-matching logic, since
-this kind of bug doesn't show up as a crash, just confidently-wrong output.
+Pure logic test (no model, no browser, no network) with three scenarios, each
+reproducing a real bug report:
+
+1. Several short field labels printed in a row with a matching value row below (e.g.
+   "Nationality / Sex / Date of Birth"), a label with an inline unit suffix ("Weight
+   (kg)"), and a merged label line ("Last Name. First Name.Middle Name" — the
+   "First Name" remainder left after stripping the "Last Name" prefix is itself another
+   field's label, not a value).
+2. `idTemplates.ts`'s position-based matching, directly against that same bug report's
+   real, unshifted coordinates, with **no label lines present at all** — the actual
+   failure mode, since the labels on that card were misread too badly for label-matching
+   alone to ever fix.
+3. A second real photo's specific failures: labels garbled character-by-character
+   ("Sex" → "SRX", "Date of Birth" → "Date af Birth", the merged name label → "Last
+   Name.Fint Nama.Middie Name"), a label garbled past recovery while its value stayed in
+   the row (breaks rank-based label/value pairing if not paired by nearest column
+   instead), and two adjacent cells (License No. + Expiration Date) fused into one OCR
+   line by the text detector.
+
+Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
+before trusting a change to the field-matching logic, since this kind of bug doesn't show
+up as a crash, just confidently-wrong output.
 
 ## Run the live model check
 
@@ -244,10 +264,16 @@ try {
    location alone — no label text needed, so this still works when a label was
    misread or merged with a neighbor. Everything the template doesn't cover falls back
    to label matching: each field's label aliases (English + Filipino) are matched
-   against recognized lines, and the value is taken from the same line or the nearest
-   line to the right/below, with the line's bounding box attached. For `PASSPORT`,
-   also parses the TD3 MRZ and uses it (checksum-validated) to fill in anything
-   template/label-matching missed.
+   against recognized lines — tolerating some recognition noise via edit-distance
+   fuzzy matching (`fuzzyMatchPrefix`), not just an exact substring — and the value is
+   taken from the same line or the nearest line to the right/below, with the line's
+   bounding box attached. Rows of short labels with a value row below them are matched
+   by nearest column, not left-to-right rank, so one label in the row failing to match
+   at all doesn't shift every field after it onto the wrong value. A pattern-based pass
+   (`splitCompoundIdExpiry`) also recovers `id_number`/`expiry_date` when the text
+   detector fuses their two cells into one OCR line. For `PASSPORT`, also parses the
+   TD3 MRZ and uses it (checksum-validated) to fill in anything template/label-matching
+   missed.
 
 ## Known approximations / next steps for your team
 
