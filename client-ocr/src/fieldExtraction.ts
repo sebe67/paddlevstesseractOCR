@@ -142,8 +142,15 @@ function isLabelOnlyText(text: string, allAliasLists: string[][]): boolean {
 // be right, not ones that merely look unusual.
 const NUMERIC_VALUE_PATTERN = /^\d+(\.\d+)?\s*[a-zA-Z]{0,3}$/;
 const DATE_VALUE_PATTERN = /\d{2,4}[/\-.]\d{1,2}[/\-.]\d{1,4}/;
+// "M"/"F" (every real example seen so far), plus the spelled-out English/Filipino words
+// in case some layout prints those instead - never a whole place name or anything else
+// multi-word. A real bug report had a passport's sex resolve to "MANILA" (its actual
+// place-of-birth value, sitting nearby with no separately-detected "F"/"M" character to
+// find instead) purely because it was the nearest unused line.
+const SEX_VALUE_PATTERN = /^(m|f|male|female|lalaki|babae)$/i;
 
 const FIELD_VALUE_VALIDATORS: Partial<Record<string, (text: string) => boolean>> = {
+  sex: (text) => SEX_VALUE_PATTERN.test(text.trim()),
   weight: (text) => NUMERIC_VALUE_PATTERN.test(text.trim()),
   height: (text) => NUMERIC_VALUE_PATTERN.test(text.trim()),
   date_of_birth: (text) => DATE_VALUE_PATTERN.test(text),

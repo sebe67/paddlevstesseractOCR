@@ -93,8 +93,23 @@ downloads of the model assets from a public GCS bucket.
   out to be some other field's label rather than skipping past it - an earlier version
   of this that simply excluded label lines from the search reached straight past
   "License No." to grab `id_number`'s own value as a bogus fourth line of the address.
-  Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/SENIOR_CITIZEN/
-  PWD, and the BACK side of any type.
+  A third real passport photo then turned up one more instance of the same underlying
+  gap `weight`/`height`/dates already had a guard for: `sex` resolved to "MANILA" - its
+  actual place-of-birth value, sitting geometrically closest to the (correctly, now,
+  after the bilingual-label fix) recognized "Kasarian/Sex" label, with no separately
+  detected "F"/"M" character to find instead, purely because nothing checked whether
+  "MANILA" looked anything like a sex value. Added `sex` to `FIELD_VALUE_VALIDATORS`
+  (accepts "M"/"F"/"Male"/"Female"/"Lalaki"/"Babae", nothing else) - with that in place,
+  sex correctly comes back unresolved from label-matching here and falls to the (already
+  correct, untouched) MRZ fallback instead. **Note on how the two extraction paths
+  relate**: MRZ parsing is not the primary source and never has been - it's a fallback
+  (`common.sex ??= {value: mrz.sex, ...}` in `index.ts`) that only fills fields
+  label-matching left empty. Every field-extraction bug fixed across this file has the
+  same shape for exactly that reason: label-matching finding *some* (wrong) value blocks
+  the trustworthy, checksum-validated MRZ result from ever being used, whereas
+  label-matching correctly declining to guess lets MRZ take over as intended. Still
+  unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/SENIOR_CITIZEN/PWD, and
+  the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -110,7 +125,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with nine scenarios, each
+Pure logic test (no model, no browser, no network) with ten scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -157,6 +172,11 @@ reproducing a real bug report:
    it - checking the multi-line continuation stops at the label rather than reaching
    past it to grab the value beyond as a bogus extra line of the address (a real bug
    this scenario's first version caught, before the fix landed).
+10. A third real PASSPORT photo's `sex` resolving to "MANILA" - its real
+    place-of-birth value, sitting nearest the (correctly recognized, after the bilingual
+    label fix) "Kasarian/Sex" label with no separately detected "F"/"M" character to
+    find instead - purely because nothing checked whether "MANILA" was even shaped like
+    a sex value.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

@@ -442,4 +442,30 @@ if (!multilineAddressPass) {
 }
 
 allPass = allPass && multilineAddressPass;
+
+// === Sex value-shape test (third real PASSPORT bug report) ===
+// With the bilingual-label fix in place, "Kasarian/Sex" correctly reduces to a solo
+// label with no other label nearby forming a row (its own row-mate, "Kapanganakan/Place
+// of Birth", is garbled past recognition as "anganakanf Ploce of" - not a bug this
+// scenario is about). Falling back to findValueNear's plain nearest-line search, it
+// picked "MANILA" - the real place-of-birth value, sitting geometrically nearest with no
+// separately-detected "F"/"M" character to find instead - purely because nothing
+// checked whether "MANILA" looked anything like a sex value. Real boxes from that
+// report.
+const sexShapeLines = [
+  line("Kasarian/Sex", [341.40394088669956, 1063.834051724138, 430.9710591133005, 1084.3659482758621]),
+  line("anganakanf Ploce of", [544.9389275332226, 1066.0267714389536, 676.2485724667774, 1083.6326035610466]),
+  line("MANILA", [456.72534496753246, 1078.925887784091, 558.6942978896104, 1102.8397372159093]),
+];
+const sexShapeResult = extractFields(sexShapeLines, "PASSPORT", "FRONT");
+
+console.log("\n=== Sex value-shape test (real PASSPORT bug report) ===\n");
+const sexShapePass = check("sex", sexShapeResult.common_fields.sex?.value, undefined);
+
+console.log(`\n${sexShapePass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!sexShapePass) {
+  console.log("\nFull output:", JSON.stringify(sexShapeResult, null, 2));
+}
+
+allPass = allPass && sexShapePass;
 process.exit(allPass ? 0 : 1);
