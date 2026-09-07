@@ -40,10 +40,16 @@ npm run test:field-extraction
 
 Pure logic test (no model, no browser, no network) reproducing a real bug report:
 several short field labels printed in a row with a matching value row below (e.g.
-"Nationality / Sex / Date of Birth"), and a label with an inline unit suffix ("Weight
-(kg)"). Fast to re-run any time `fieldExtraction.ts` changes — worth running before
-trusting a change to the field-matching logic, since this kind of bug doesn't show up
-as a crash, just confidently-wrong output.
+"Nationality / Sex / Date of Birth"), a label with an inline unit suffix ("Weight
+(kg)"), and a merged label line ("Last Name. First Name.Middle Name" — the
+"First Name" remainder left after stripping the "Last Name" prefix is itself another
+field's label, not a value). A second scenario in the same script exercises
+`idTemplates.ts`'s position-based matching directly against that bug report's real,
+unshifted coordinates with **no label lines present at all** — the actual failure
+mode, since the labels on that card were misread too badly for label-matching alone
+to ever fix. Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts`
+changes — worth running before trusting a change to the field-matching logic, since
+this kind of bug doesn't show up as a crash, just confidently-wrong output.
 
 ## Run the live model check
 
@@ -233,10 +239,15 @@ try {
    decoding against `ppocrv5_dict.txt`.
 3. **Classify `id_type`** via keyword hits across the recognized text (override with
    `runIdOcr(image, side, { idType: "PASSPORT" })` if the caller already knows it).
-4. **Extract fields**: match each field's label aliases (English + Filipino) against
-   recognized lines, take the value from the same line or the nearest line to the
-   right/below, and attach the line's bounding box. For `PASSPORT`, also parses the
-   TD3 MRZ and uses it (checksum-validated) to fill in anything label-matching missed.
+4. **Extract fields** (`fieldExtraction.ts`): for `id_type` + side combinations with a
+   known-good position template (`idTemplates.ts`), match template fields first by
+   location alone — no label text needed, so this still works when a label was
+   misread or merged with a neighbor. Everything the template doesn't cover falls back
+   to label matching: each field's label aliases (English + Filipino) are matched
+   against recognized lines, and the value is taken from the same line or the nearest
+   line to the right/below, with the line's bounding box attached. For `PASSPORT`,
+   also parses the TD3 MRZ and uses it (checksum-validated) to fill in anything
+   template/label-matching missed.
 
 ## Known approximations / next steps for your team
 
@@ -244,6 +255,21 @@ try {
   output) rather than pulling in a full polygon-clipping library — matches PaddleOCR's
   default `box_type="quad"` behavior; swap in a real polygon clipper if you start
   seeing curved/irregular text blobs it doesn't handle well.
+- **Position templates** (`idTemplates.ts`) currently cover only six fields on
+  `DRIVERS_LICENSE`/`FRONT` (`nationality`, `sex`, `date_of_birth`, `id_number`,
+  `blood_type`, `license_restrictions`), taken from one real specimen scan (600×410px,
+  confirmed in a bug report) — the only fields with a real, confirmed-correct bounding
+  box to build a region from. Deliberately left out of that template: `weight`,
+  `height`, `expiry_date`, `address`, and the name fields — those still fall back to
+  label matching, which is a real gap for `address`/`weight`/`height`/`expiry_date`
+  (no confirmed-good position for them yet) and mostly moot for the name fields, since
+  the merged-label fix above now separates the "Last Name"/"First Name" labels from
+  each other without needing a template at all. Add more field regions here (or a
+  template for another id_type/side) as real, confirmed-correct bounding boxes turn
+  up — normalize pixel coordinates against the specimen's actual image dimensions the
+  same way the existing entries do; don't guess at a region without one, since a wrong
+  position is worse than no template (it silently claims the line before label-matching
+  ever gets a chance to try).
 - **`id_type` detection and field-label aliases** (`idTypeAliases.ts`) are a starting
   point covering the 12 PH ID types you specified; PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/
   TIN/PHILHEALTH weren't part of the original PaddleOCR-vs-Tesseract benchmark, so

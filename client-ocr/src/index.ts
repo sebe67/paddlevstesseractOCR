@@ -93,7 +93,7 @@ export async function runIdOcr(
   }
 
   const idType = options.idType ?? detectIdType(lines);
-  const { common_fields, variant_fields } = extractFields(lines, idType, side);
+  const { common_fields, variant_fields } = extractFields(lines, idType, side, { width: canvas.width, height: canvas.height });
   const rawOcrText = lines.map((l) => l.text).join("\n");
 
   if (idType === "PASSPORT") {
@@ -184,3 +184,6 @@ export type {
   RequiredCommonFields,
   VariantFields,
 } from "./types";
+export { ID_TEMPLATES } from "./idTemplates";
+export type { IdTemplate, TemplateRegion } from "./idTemplates";
+export type { ImageSize } from "./fieldExtraction";
