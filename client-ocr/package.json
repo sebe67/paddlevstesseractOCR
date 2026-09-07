@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "example": "vite",
-    "check:live-models": "tsx scripts/live-model-check.mjs"
+    "check:live-models": "tsx scripts/live-model-check.mjs",
+    "test:field-extraction": "tsx scripts/field-extraction-test.mjs"
   },
   "dependencies": {
     "onnxruntime-web": "1.29.0"

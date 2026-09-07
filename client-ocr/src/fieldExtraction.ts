@@ -21,6 +21,12 @@ export function detectIdType(lines: RecognizedTextLine[]): IdType | undefined {
   return best?.type;
 }
 
+// Matches a same-line "remainder" that's just a unit annotation stuck to the label
+// (e.g. "Weight(kg)" -> remainder "(kg)", "Height(m)" -> "(m)") rather than an actual
+// value. Letters/degree-sign only inside parens, no digits - real values wouldn't match
+// this. Without this check that remainder gets accepted as the field's value outright.
+const UNIT_ANNOTATION_PATTERN = /^\([a-zA-Z°]{1,6}\)$/;
+
 /** If `lineText` starts with one of `aliases` (as a label), returns what's left after stripping it. */
 function matchLabel(lineText: string, aliases: string[]): { matched: boolean; remainder: string } {
   const norm = normalize(lineText);
@@ -29,6 +35,9 @@ function matchLabel(lineText: string, aliases: string[]): { matched: boolean; re
     if (norm === a) return { matched: true, remainder: "" };
     if (norm.startsWith(a)) {
       const remainder = lineText.slice(alias.length).replace(/^[\s:.\-]+/, "").trim();
+      if (UNIT_ANNOTATION_PATTERN.test(remainder)) {
+        return { matched: true, remainder: "" };
+      }
       return { matched: true, remainder };
     }
   }
@@ -83,11 +92,135 @@ function toOcrField(text: string, confidence: number, box: [number, number, numb
   return { value: text.trim(), confidence, source_side: side, bounding_box: box };
 }
 
+interface FieldTarget {
+  target: Record<string, OcrField | undefined>;
+  field: string;
+  aliases: string[];
+}
+
+interface LabelHit {
+  lineIndex: number;
+  target: Record<string, OcrField | undefined>;
+  field: string;
+}
+
 /**
- * Label-keyword + bounding-box heuristic field extractor: for each known field, find a
- * line that matches one of its label aliases, then take the value either from the rest
- * of that same line (e.g. "Sex: F") or from the nearest unused line to its right/below
- * (e.g. a label on its own line with the value printed underneath).
+ * Groups line indices into left-to-right rows by y-center proximity (within ~0.6x a
+ * line's own height of each other) - the same "is this roughly the same printed row"
+ * test used elsewhere, factored out here since both the label side and the value side
+ * of the grid-matching step below need it. Returns rows top-to-bottom.
+ */
+function clusterIntoRows(lines: RecognizedTextLine[], indices: number[]): number[][] {
+  const withY = indices
+    .map((i) => ({
+      i,
+      cy: (lines[i].boundingBox[1] + lines[i].boundingBox[3]) / 2,
+      h: lines[i].boundingBox[3] - lines[i].boundingBox[1],
+    }))
+    .sort((a, b) => a.cy - b.cy);
+
+  const rows: { indices: number[]; y: number }[] = [];
+  for (const item of withY) {
+    const row = rows.find((r) => Math.abs(r.y - item.cy) < item.h * 0.6);
+    if (row) {
+      row.indices.push(item.i);
+      row.y = (row.y * (row.indices.length - 1) + item.cy) / row.indices.length;
+    } else {
+      rows.push({ indices: [item.i], y: item.cy });
+    }
+  }
+
+  // Sort by center x, not left edge - a wide box (e.g. "Date of Birth") can start to
+  // the left of a narrower box that's visually after it (e.g. "Sex"), which left-edge
+  // sorting would get backwards.
+  for (const row of rows) {
+    row.indices.sort((a, b) => {
+      const ax = (lines[a].boundingBox[0] + lines[a].boundingBox[2]) / 2;
+      const bx = (lines[b].boundingBox[0] + lines[b].boundingBox[2]) / 2;
+      return ax - bx;
+    });
+  }
+  return rows.sort((a, b) => a.y - b.y).map((r) => r.indices);
+}
+
+/** Every not-yet-used line that is, on its own, nothing but a known field's label (empty remainder). */
+function findLabelOnlyHits(lines: RecognizedTextLine[], used: Set<number>, fieldTargets: FieldTarget[]): LabelHit[] {
+  const hits: LabelHit[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    for (const { target, field, aliases } of fieldTargets) {
+      if (target[field]) continue;
+      const { matched, remainder } = matchLabel(lines[i].text, aliases);
+      if (matched && remainder.length === 0) {
+        hits.push({ lineIndex: i, target, field });
+        break;
+      }
+    }
+  }
+  return hits;
+}
+
+/**
+ * Handles the case findValueNear's one-field-at-a-time nearest-neighbor search gets
+ * wrong: several short field labels printed in a row (e.g. "Nationality / Sex / Date of
+ * Birth"), with their values in a matching row underneath. Matching each label
+ * independently to "whichever unused line is nearest" breaks down here - labels are
+ * often more tightly spaced than the values below them, so the nearest-by-distance
+ * value for label N can actually belong to label N-1 or N+1, and because fields are
+ * resolved one at a time, an earlier field can end up greedily claiming a later field's
+ * value out from under it (this is exactly what produced the swapped
+ * nationality/sex/date_of_birth values this was written to fix).
+ *
+ * Instead: find rows containing 2+ label-only hits, find the nearest row of unused
+ * lines below that row, and pair them by rank (leftmost label with leftmost value, and
+ * so on) - the same left-to-right correspondence a human reads the row with, rather
+ * than per-field nearest-distance search.
+ */
+function resolveGridRows(lines: RecognizedTextLine[], used: Set<number>, fieldTargets: FieldTarget[], side: DocumentSide): void {
+  const labelHits = findLabelOnlyHits(lines, used, fieldTargets);
+  if (labelHits.length < 2) return;
+
+  const hitsByLine = new Map(labelHits.map((h) => [h.lineIndex, h]));
+  const labelLineIndices = labelHits.map((h) => h.lineIndex);
+  const labelRows = clusterIntoRows(lines, labelLineIndices);
+
+  for (const labelRow of labelRows) {
+    if (labelRow.length < 2) continue; // solo labels: leave for the existing per-field search
+
+    const rowBottom = Math.max(...labelRow.map((i) => lines[i].boundingBox[3]));
+    const rowHeight = Math.max(...labelRow.map((i) => lines[i].boundingBox[3] - lines[i].boundingBox[1]));
+
+    const belowCandidates: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (used.has(i) || hitsByLine.has(i)) continue; // skip already-used lines and other labels
+      const top = lines[i].boundingBox[1];
+      if (top > rowBottom - 2 && top < rowBottom + rowHeight * 5) belowCandidates.push(i);
+    }
+    if (belowCandidates.length < 2) continue;
+
+    const valueRows = clusterIntoRows(lines, belowCandidates);
+    const valueRow = valueRows[0]; // nearest row below
+    if (valueRow.length < 2) continue;
+
+    const pairCount = Math.min(labelRow.length, valueRow.length);
+    for (let k = 0; k < pairCount; k++) {
+      const hit = hitsByLine.get(labelRow[k])!;
+      if (hit.target[hit.field]) continue;
+      const valueLine = lines[valueRow[k]];
+      hit.target[hit.field] = toOcrField(valueLine.text, valueLine.confidence, valueLine.boundingBox, side);
+      used.add(labelRow[k]);
+      used.add(valueRow[k]);
+    }
+  }
+}
+
+/**
+ * Label-keyword + bounding-box heuristic field extractor. Two passes: first
+ * resolveGridRows handles rows of 2+ short field labels with a matching value row
+ * below (see its doc comment); then the remaining fields fall back to the simpler
+ * per-field search - a line matching one of its label aliases, then the value either
+ * from the rest of that same line (e.g. "Sex: F") or the nearest unused line to its
+ * right/below (e.g. a solo label with the value printed underneath).
  */
 export function extractFields(
   lines: RecognizedTextLine[],
@@ -98,7 +231,22 @@ export function extractFields(
   const variant: VariantFields = {};
   const used = new Set<number>();
 
+  const commonTarget = common as Record<string, OcrField | undefined>;
+  const variantTarget = variant as Record<string, OcrField | undefined>;
+
+  const applicableVariantFields = idType ? VARIANT_FIELDS_BY_ID_TYPE[idType] : Object.keys(VARIANT_FIELD_ALIASES);
+
+  const fieldTargets: FieldTarget[] = [
+    ...Object.entries(COMMON_FIELD_ALIASES).map(([field, aliases]) => ({ target: commonTarget, field, aliases })),
+    ...applicableVariantFields
+      .map((field) => ({ target: variantTarget, field, aliases: VARIANT_FIELD_ALIASES[field] }))
+      .filter((f): f is FieldTarget => Boolean(f.aliases)),
+  ];
+
+  resolveGridRows(lines, used, fieldTargets, side);
+
   function assign(target: Record<string, OcrField | undefined>, field: string, aliases: string[]) {
+    if (target[field]) return; // already resolved by resolveGridRows
     for (let i = 0; i < lines.length; i++) {
       if (used.has(i)) continue;
       const { matched, remainder } = matchLabel(lines[i].text, aliases);
@@ -120,17 +268,8 @@ export function extractFields(
     }
   }
 
-  const commonTarget = common as Record<string, OcrField | undefined>;
-  const variantTarget = variant as Record<string, OcrField | undefined>;
-
-  for (const [field, aliases] of Object.entries(COMMON_FIELD_ALIASES)) {
-    assign(commonTarget, field, aliases);
-  }
-
-  const applicableVariantFields = idType ? VARIANT_FIELDS_BY_ID_TYPE[idType] : Object.keys(VARIANT_FIELD_ALIASES);
-  for (const field of applicableVariantFields) {
-    const aliases = VARIANT_FIELD_ALIASES[field];
-    if (aliases) assign(variantTarget, field, aliases);
+  for (const { target, field, aliases } of fieldTargets) {
+    assign(target, field, aliases);
   }
 
   return { common_fields: common, variant_fields: variant };

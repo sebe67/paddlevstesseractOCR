@@ -30,6 +30,21 @@ downloads of the model assets from a public GCS bucket.
   already sums to ~1) rather than assuming, so it works correctly across both the v1.0
   and v1.1 model exports despite their different internal op-naming conventions.
 
+## Run the field-extraction regression test
+
+```sh
+npm install
+npm install --save-dev tsx
+npm run test:field-extraction
+```
+
+Pure logic test (no model, no browser, no network) reproducing a real bug report:
+several short field labels printed in a row with a matching value row below (e.g.
+"Nationality / Sex / Date of Birth"), and a label with an inline unit suffix ("Weight
+(kg)"). Fast to re-run any time `fieldExtraction.ts` changes — worth running before
+trusting a change to the field-matching logic, since this kind of bug doesn't show up
+as a crash, just confidently-wrong output.
+
 ## Run the live model check
 
 This needs two extra dev tools (`tsx` to run TypeScript directly, `sharp` for image
