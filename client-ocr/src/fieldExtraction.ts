@@ -123,14 +123,14 @@ function isKnownLabelText(text: string, allAliasLists: string[][]): boolean {
  * itself just another field's label.
  */
 function isLabelOnlyText(text: string, allAliasLists: string[][]): boolean {
-  const norm = normalize(text);
-  if (!norm) return false;
-  return allAliasLists.some((aliases) =>
-    aliases.some((alias) => {
-      const { matched, matchedLength } = fuzzyMatchPrefix(norm, normalize(alias));
-      return matched && matchedLength >= norm.length;
-    })
-  );
+  if (!normalize(text)) return false;
+  // Delegates to matchLabel (checked against every known alias at once) rather than a
+  // separate, simpler length check, so this benefits from the same trailing-punctuation
+  // handling matchLabel already does elsewhere - e.g. "License No." only prefix-matches
+  // "license no" for 10 of its 11 characters, but the leftover "." gets stripped and
+  // recognized as empty, so it's still correctly a label-only line, not almost one.
+  const { matched, remainder } = matchLabel(text, allAliasLists.flat(), allAliasLists);
+  return matched && remainder.length === 0;
 }
 
 // A value that plainly isn't the right shape for its field is worse than no value at all
@@ -236,6 +236,71 @@ function findValueNear(
   });
 
   return best;
+}
+
+// Fields whose printed value routinely wraps across more than one detected text line -
+// a PH address is the clear case ("UNIT/HOUSE NO...STREET NAME," on one line,
+// "BARANGAY,CITY/MUNICIPALITY" on the next). Deliberately just this one field for now:
+// extending the wrong field onto its neighbor's label/value is a worse failure than
+// under-extending a field that only sometimes wraps, so this only applies where
+// multi-line values are the norm, not merely possible.
+const MULTILINE_FIELDS = new Set(["address"]);
+const MULTILINE_MAX_CONTINUATION_LINES = 3;
+
+/**
+ * Extends a just-found value line downward with any immediately-following, left-aligned
+ * lines that are plausibly its continuation, joining their text with a space and
+ * unioning their bounding boxes. Stops at the first line that's used, that isn't
+ * reasonably close below and left-aligned with the line before it, or that's itself a
+ * known label (the next field's label line, not a continuation of this one) -
+ * `isLabelOnlyText` reuses matchLabel's own trailing-punctuation handling, so a label
+ * like "License No." close below is still recognized as a label and excluded even
+ * though its literal alias match doesn't consume every character.
+ */
+function extendMultilineValue(
+  firstLine: RecognizedTextLine,
+  firstIndex: number,
+  lines: RecognizedTextLine[],
+  used: Set<number>,
+  allAliasLists: string[][]
+): { text: string; box: [number, number, number, number]; indices: number[] } {
+  let text = firstLine.text;
+  let box: [number, number, number, number] = [...firstLine.boundingBox];
+  const indices = [firstIndex];
+  let cursor = firstLine;
+
+  for (let step = 0; step < MULTILINE_MAX_CONTINUATION_LINES; step++) {
+    const cursorHeight = cursor.boundingBox[3] - cursor.boundingBox[1];
+    let best: { line: RecognizedTextLine; index: number; dist: number } | undefined;
+
+    lines.forEach((cand, idx) => {
+      if (used.has(idx) || indices.includes(idx)) return;
+      const leftAlignOffset = Math.abs(cand.boundingBox[0] - cursor.boundingBox[0]);
+      const top = cand.boundingBox[1];
+      const below = top > cursor.boundingBox[3] - 2 && top < cursor.boundingBox[3] + cursorHeight * 2;
+      if (!below || leftAlignOffset > cursorHeight * 5) return;
+      const dist = (top - cursor.boundingBox[3]) * 3 + leftAlignOffset;
+      if (!best || dist < best.dist) best = { line: cand, index: idx, dist };
+    });
+
+    // The nearest candidate below is checked for being a label only *after* finding it,
+    // not excluded from the search up front - a label line acts as a wall: if it's the
+    // closest thing below, stop there, rather than skip past it to whatever's next
+    // (which is exactly how an earlier version of this reached past "License No." to
+    // grab the id_number value two rows down as a bogus "continuation" of the address).
+    if (!best || isLabelOnlyText(best.line.text, allAliasLists)) break;
+    text += " " + best.line.text;
+    box = [
+      Math.min(box[0], best.line.boundingBox[0]),
+      Math.min(box[1], best.line.boundingBox[1]),
+      Math.max(box[2], best.line.boundingBox[2]),
+      Math.max(box[3], best.line.boundingBox[3]),
+    ];
+    indices.push(best.index);
+    cursor = best.line;
+  }
+
+  return { text, box, indices };
 }
 
 function toOcrField(text: string, confidence: number, box: [number, number, number, number], side: DocumentSide): OcrField {
@@ -583,7 +648,13 @@ export function extractFields(
       if (found) {
         used.add(i);
         used.add(found.index);
-        target[field] = toOcrField(found.line.text, found.line.confidence, found.line.boundingBox, side);
+        if (MULTILINE_FIELDS.has(field)) {
+          const extended = extendMultilineValue(found.line, found.index, lines, used, allAliasLists);
+          extended.indices.forEach((idx) => used.add(idx));
+          target[field] = toOcrField(extended.text, found.line.confidence, extended.box, side);
+        } else {
+          target[field] = toOcrField(found.line.text, found.line.confidence, found.line.boundingBox, side);
+        }
         return;
       }
     }

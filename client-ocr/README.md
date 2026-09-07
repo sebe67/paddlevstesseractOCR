@@ -82,8 +82,19 @@ downloads of the model assets from a public GCS bucket.
   the real (wide) address value's own left edge lines up with the label almost exactly.
   Fixed by comparing left edge to left edge, the metric that actually matches "roughly
   left-aligned with the label" (this function's own doc comment) for a label-above-value
-  layout. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/
-  SENIOR_CITIZEN/PWD, and the BACK side of any type.
+  layout. With that fixed, `address` only picked up its first line ("UNIT/HOUSE
+  NO.BUILDING, STREET NAME,"), not the continuation line directly below it
+  ("BARANGAY,CITY/MUNICIPALITY") - a real PH address routinely wraps across more than
+  one detected text line. Added `extendMultilineValue`, applied only to `address` for
+  now (a field where wrapping is the norm, not merely possible - extending the wrong
+  field onto its neighbor's label/value is worse than under-extending a field that only
+  sometimes wraps): once a value line is found, it keeps pulling in whichever
+  left-aligned line is nearest immediately below, stopping when that nearest line turns
+  out to be some other field's label rather than skipping past it - an earlier version
+  of this that simply excluded label lines from the search reached straight past
+  "License No." to grab `id_number`'s own value as a bogus fourth line of the address.
+  Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/SENIOR_CITIZEN/
+  PWD, and the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -99,7 +110,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with eight scenarios, each
+Pure logic test (no model, no browser, no network) with nine scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -140,6 +151,12 @@ reproducing a real bug report:
    because `findValueNear`'s "below" distance measured the candidate's *center* x against
    the label's *left* edge, letting a narrow off-column box beat the real (wide) value
    whose own left edge actually lines up with the label.
+9. The specimen card's full real address, spanning two detected lines
+   ("UNIT/HOUSE NO.BUILDING, STREET NAME," then "BARANGAY,CITY/MUNICIPALITY" directly
+   below), plus a close-below "License No." label and `id_number`'s value right after
+   it - checking the multi-line continuation stops at the label rather than reaching
+   past it to grab the value beyond as a bogus extra line of the address (a real bug
+   this scenario's first version caught, before the fix landed).
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
@@ -353,7 +370,11 @@ try {
    bounding box attached, but only if that candidate actually looks like a plausible
    value for the field: not itself just another field's label (`isLabelOnlyText`), and
    matching the field's expected shape where one exists (`FIELD_VALUE_VALIDATORS` —
-   weight/height numeric, dates date-shaped). Rows of short labels with a value row
+   weight/height numeric, dates date-shaped). For fields whose value routinely wraps
+   across more than one detected line (currently just `address`), `extendMultilineValue`
+   then keeps pulling in whichever left-aligned line is nearest immediately below,
+   stopping as soon as the nearest such line is itself a label rather than reaching past
+   it. Rows of short labels with a value row
    below them are matched by nearest column, not left-to-right rank, so one label in
    the row failing to match at all doesn't shift every field after it onto the wrong
    value. Two pattern-based passes run last: `splitCompoundIdExpiry` recovers

@@ -294,8 +294,11 @@ specimenPass = check("sex", specimenResult.common_fields.sex?.value, "M") && spe
 specimenPass = check("date_of_birth", specimenResult.common_fields.date_of_birth?.value, "1987/10/04") && specimenPass;
 specimenPass = check("blood_type", specimenResult.common_fields.blood_type?.value, "O+") && specimenPass;
 specimenPass =
-  check("address", specimenResult.common_fields.address?.value, "UNIT/HOUSE NO.BUILDING, STREET NAME,") &&
-  specimenPass;
+  check(
+    "address",
+    specimenResult.common_fields.address?.value,
+    "UNIT/HOUSE NO.BUILDING, STREET NAME, BARANGAY,CITY/MUNICIPALITY"
+  ) && specimenPass;
 specimenPass = check("nationality", specimenResult.variant_fields.nationality?.value, "PHL") && specimenPass;
 specimenPass = check("weight", specimenResult.variant_fields.weight?.value, "70") && specimenPass;
 specimenPass = check("height", specimenResult.variant_fields.height?.value, "1.55") && specimenPass;
@@ -404,4 +407,39 @@ if (!addressPass) {
 }
 
 allPass = allPass && addressPass;
+
+// === Multi-line address continuation test ===
+// A real PH address wraps across more than one detected line ("UNIT/HOUSE
+// NO.BUILDING, STREET NAME," then "BARANGAY,CITY/MUNICIPALITY" directly below,
+// left-aligned). extendMultilineValue is supposed to pull in that continuation line -
+// but must stop before swallowing the next field's label too, even though "License No."
+// sits close below with a similar left edge (real boxes: the gap between the address
+// continuation line and "License No." is under 5px, well inside how far a real
+// continuation line is allowed to be). isLabelOnlyText is what has to draw that line.
+const multilineAddressLines = [
+  line("Address", [217.61410361842104, 201.56588040865387, 266.9253700657895, 217.30431189903848]),
+  line("UNIT/HOUSE NO.BUILDING, STREET NAME,", [217.97921926587688, 216.7141818052796, 488.5997281025442, 233.69447204087427]),
+  line("BARANGAY,CITY/MUNICIPALITY", [218.02763819095478, 232.53176942404332, 417.49867759851884, 249.4153459605721]),
+  line("License No.", [220.0091673856773, 254.22229665825978, 282.29346419327, 268.13347257250945]),
+  line("N03-12-123456", [217.20068892750746, 267.1866495827286, 324.57562686196616, 283.7508504172714]),
+];
+const multilineAddressResult = extractFields(multilineAddressLines, "DRIVERS_LICENSE", "FRONT");
+
+console.log("\n=== Multi-line address continuation test ===\n");
+let multilineAddressPass = true;
+multilineAddressPass =
+  check(
+    "address",
+    multilineAddressResult.common_fields.address?.value,
+    "UNIT/HOUSE NO.BUILDING, STREET NAME, BARANGAY,CITY/MUNICIPALITY"
+  ) && multilineAddressPass;
+multilineAddressPass =
+  check("id_number", multilineAddressResult.variant_fields.id_number?.value, "N03-12-123456") && multilineAddressPass;
+
+console.log(`\n${multilineAddressPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!multilineAddressPass) {
+  console.log("\nFull output:", JSON.stringify(multilineAddressResult, null, 2));
+}
+
+allPass = allPass && multilineAddressPass;
 process.exit(allPass ? 0 : 1);
