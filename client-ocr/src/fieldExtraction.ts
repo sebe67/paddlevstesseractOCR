@@ -466,6 +466,36 @@ function splitCompoundIdExpiry(lines: RecognizedTextLine[], variant: Record<stri
 }
 
 /**
+ * PH IDs print the full name as one line, "LASTNAME, FIRSTNAME MIDDLENAME" (confirmed
+ * standard format - see README). Label matching has no way to know that: it finds this
+ * whole line as the value for whichever name field's label sat nearest, which in
+ * practice is always last_name (since "Last Name" is the first label in the merged
+ * "Last Name. First Name.Middle Name" line, and the printed name sits right below it),
+ * leaving first_name/middle_name empty. Split it apart here, once, after the label
+ * matching above has found it. The split parts share the whole line's bounding box -
+ * there's no way to recover individual boxes for words that were never detected as
+ * separate lines in the first place.
+ */
+function splitCommaSeparatedName(common: Record<string, OcrField | undefined>): void {
+  const current = common.last_name;
+  if (!current || !current.value.includes(",")) return;
+
+  const [lastPart, restPart] = current.value.split(",").map((s) => s.trim());
+  if (!lastPart || !restPart) return;
+
+  const [firstWord, ...middleWords] = restPart.split(/\s+/).filter(Boolean);
+  if (!firstWord) return;
+
+  common.last_name = { ...current, value: lastPart };
+  if (!common.first_name?.value) {
+    common.first_name = { ...current, value: firstWord };
+  }
+  if (middleWords.length > 0 && !common.middle_name?.value) {
+    common.middle_name = { ...current, value: middleWords.join(" ") };
+  }
+}
+
+/**
  * Label-keyword + bounding-box heuristic field extractor. Three passes: first
  * resolveFromTemplate claims fields a known-good position template covers (see its doc
  * comment); then resolveGridRows handles rows of 2+ short field labels with a matching
@@ -537,6 +567,7 @@ export function extractFields(
   if (applicableVariantFields.includes("id_number") && applicableVariantFields.includes("expiry_date")) {
     splitCompoundIdExpiry(lines, variantTarget, side);
   }
+  splitCommaSeparatedName(commonTarget);
 
   return { common_fields: common, variant_fields: variant };
 }

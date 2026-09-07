@@ -40,8 +40,16 @@ downloads of the model assets from a public GCS bucket.
   itself, in full, some other field's label, and `FIELD_VALUE_VALIDATORS` rejects a
   candidate that doesn't even look like the right shape (weight/height must be numeric,
   dates must look date-shaped) before accepting it — trying the next-nearest candidate
-  instead of settling for a bad one. Still unvalidated: any id_type other than
-  DRIVERS_LICENSE, and the BACK side.
+  instead of settling for a bad one. A fourth run of the same card, with those fixes in
+  place, came back with every field correct except one: the printed name resolves as
+  one comma-separated line ("DELA CRUZ, JUAN PEDRO GARCIA") — PH IDs' standard
+  `"LASTNAME, FIRSTNAME MIDDLENAME"` format — which was being kept whole as `last_name`,
+  leaving `first_name`/`middle_name` empty. Fixed with `splitCommaSeparatedName`, a
+  dedicated post-process step. This run also confirmed the position template
+  (`nationality`, `sex`, `date_of_birth`, `id_number`, `blood_type`,
+  `license_restrictions`) and the generic label/grid-row/plausibility logic all held up
+  together on a real, complete detection pass — not just each fix in isolation. Still
+  unvalidated: any id_type other than DRIVERS_LICENSE, and the BACK side.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -57,7 +65,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with four scenarios, each
+Pure logic test (no model, no browser, no network) with five scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -79,6 +87,11 @@ reproducing a real bug report:
    without checking whether it was even a plausible value: `last_name` grabbing the
    literal text "Nationality" (another field's own label), `weight` grabbing an address
    placeholder line, `expiry_date` grabbing a single stray character.
+5. A full end-to-end replay of every line a real run actually detected on the specimen
+   card at once (not a reconstructed subset) — including that the printed name comes as
+   one comma-separated line, `"LASTNAME, FIRSTNAME MIDDLENAME"`, that needs splitting
+   into `last_name`/`first_name`/`middle_name` rather than being kept whole as
+   `last_name` with `first_name` left empty.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
@@ -295,11 +308,13 @@ try {
    weight/height numeric, dates date-shaped). Rows of short labels with a value row
    below them are matched by nearest column, not left-to-right rank, so one label in
    the row failing to match at all doesn't shift every field after it onto the wrong
-   value. A pattern-based pass (`splitCompoundIdExpiry`) also recovers
+   value. Two pattern-based passes run last: `splitCompoundIdExpiry` recovers
    `id_number`/`expiry_date` when the text detector fuses their two cells into one OCR
-   line. For `PASSPORT`, also parses the
-   TD3 MRZ and uses it (checksum-validated) to fill in anything template/label-matching
-   missed.
+   line, and `splitCommaSeparatedName` splits the printed name — one line, PH IDs'
+   standard `"LASTNAME, FIRSTNAME MIDDLENAME"` format — into `last_name`/`first_name`/
+   `middle_name` rather than leaving it whole as `last_name`. For `PASSPORT`, also
+   parses the TD3 MRZ and uses it (checksum-validated) to fill in anything
+   template/label-matching missed.
 
 ## Known approximations / next steps for your team
 
