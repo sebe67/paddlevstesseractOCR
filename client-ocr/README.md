@@ -64,8 +64,16 @@ downloads of the model assets from a public GCS bucket.
   correctly handles a wholly garbled label like "SRX" already does that; the bug was in
   also allowing a fuzzy match to explain away part of a much longer, unrelated line as
   "label + leftover value". An exact substring match (e.g. "Sex: F") still works as
-  before. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/
-  SENIOR_CITIZEN/PWD, and the BACK side of any type.
+  before. A second real passport photo, with that fix in place, came back with every
+  field correct except `sex` again - a different bug this time: PH passports print
+  bilingual Filipino/English labels on one line, separated by "/" ("Kasarian/Sex" -
+  "Kasarian" is Filipino for "sex"). Matching the Filipino half (exactly - a real, listed
+  alias) left "/Sex" as the remainder, and the leading-punctuation stripper didn't strip
+  "/", so "/Sex" was never recognized as *also* being a known label (the same field's own
+  English name in this case, not a value) - and got accepted as sex's value outright.
+  Fixed by stripping a leading "/" (and "|", "\\") the same as the whitespace/colon/
+  period/hyphen already stripped there. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/
+  VOTERS/SSS/TIN/PHILHEALTH/SENIOR_CITIZEN/PWD, and the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -81,7 +89,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with six scenarios, each
+Pure logic test (no model, no browser, no network) with seven scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -113,6 +121,10 @@ reproducing a real bug report:
    "id no") coincidentally matching the first few characters of an unrelated, much
    longer line and treating the rest as its value ("SEBASTIAN VINCENT PABLO" → sex =
    "ASTIAN VINCENT PABLO"; "15 NOV 2022" → id_number = "V 2022").
+7. A second real PASSPORT photo's bilingual "Kasarian/Sex" label - matching the Filipino
+   half exactly still left "/Sex" as the remainder, and without stripping the leading
+   "/" it was never recognized as also being a known label (this field's own English
+   name), so "/Sex" was accepted as sex's value.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

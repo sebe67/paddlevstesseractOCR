@@ -172,7 +172,13 @@ function matchLabel(
     // match is only trusted when it consumes the *whole* line (handled above), where
     // there's no leftover to get wrong.
     if (!exact) continue;
-    const remainder = lineText.slice(matchedLength).replace(/^[\s:.\-]+/, "").trim();
+    // Strip a leading separator before checking the remainder - PH passports print
+    // bilingual "Filipino/English" labels on one line ("Kasarian/Sex"), and matching
+    // the Filipino half ("Kasarian") leaves "/Sex" as the remainder. Without stripping
+    // the "/" here, isKnownLabelText below never recognizes "/Sex" as starting with the
+    // (English) "sex" alias - it's the exact same field's own label in the other
+    // language, not a value - and "/Sex" gets accepted as sex's value outright.
+    const remainder = lineText.slice(matchedLength).replace(/^[\s:./|\\-]+/, "").trim();
     if (UNIT_ANNOTATION_PATTERN.test(remainder) || isKnownLabelText(remainder, allAliasLists)) {
       return { matched: true, remainder: "" };
     }

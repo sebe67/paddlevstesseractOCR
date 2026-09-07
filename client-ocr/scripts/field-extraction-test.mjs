@@ -356,4 +356,24 @@ if (!passportPass) {
 }
 
 allPass = allPass && passportPass;
+
+// === Bilingual merged-label test (second real PASSPORT bug report) ===
+// PH passports print bilingual Filipino/English labels on one line, separated by "/"
+// ("Kasarian/Sex" - "Kasarian" is Filipino for "sex"). Matching the Filipino half left
+// "/Sex" as the remainder, and since the leading-separator strip didn't remove "/", the
+// remainder never got recognized as *also* being a known label (the same field's own
+// English name, not a value) - "/Sex" was accepted as sex's value outright. Real line
+// from that report.
+const bilingualLabelLines = [line("Kasarian/Sex", [341.40394088669956, 1063.834051724138, 430.9710591133005, 1084.3659482758621])];
+const bilingualLabelResult = extractFields(bilingualLabelLines, "PASSPORT", "FRONT");
+
+console.log("\n=== Bilingual merged-label test (real PASSPORT bug report) ===\n");
+const bilingualLabelPass = check("sex", bilingualLabelResult.common_fields.sex?.value, undefined);
+
+console.log(`\n${bilingualLabelPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!bilingualLabelPass) {
+  console.log("\nFull output:", JSON.stringify(bilingualLabelResult, null, 2));
+}
+
+allPass = allPass && bilingualLabelPass;
 process.exit(allPass ? 0 : 1);
