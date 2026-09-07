@@ -72,8 +72,18 @@ downloads of the model assets from a public GCS bucket.
   "/", so "/Sex" was never recognized as *also* being a known label (the same field's own
   English name in this case, not a value) - and got accepted as sex's value outright.
   Fixed by stripping a leading "/" (and "|", "\\") the same as the whitespace/colon/
-  period/hyphen already stripped there. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/
-  VOTERS/SSS/TIN/PHILHEALTH/SENIOR_CITIZEN/PWD, and the BACK side of any type.
+  period/hyphen already stripped there. Going back to the DRIVERS_LICENSE specimen with
+  fresh eyes then turned up a bug that had been there since the very first report but
+  never flagged: `address` resolves to "AUTODEAL", a short, unrelated line sitting far to
+  the left near the ID photo placeholder, instead of the real address value directly
+  below the "Address" label. The cause was in `findValueNear`'s "below" distance metric,
+  which compared a candidate's *center* x against the label's *left* edge - "AUTODEAL"'s
+  narrow box put its center closer to the label's left edge by that measure, even though
+  the real (wide) address value's own left edge lines up with the label almost exactly.
+  Fixed by comparing left edge to left edge, the metric that actually matches "roughly
+  left-aligned with the label" (this function's own doc comment) for a label-above-value
+  layout. Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/TIN/PHILHEALTH/
+  SENIOR_CITIZEN/PWD, and the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
   softmax internally, in which case using the raw output values as confidence directly
@@ -89,7 +99,7 @@ npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with seven scenarios, each
+Pure logic test (no model, no browser, no network) with eight scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -125,6 +135,11 @@ reproducing a real bug report:
    half exactly still left "/Sex" as the remainder, and without stripping the leading
    "/" it was never recognized as also being a known label (this field's own English
    name), so "/Sex" was accepted as sex's value.
+8. The specimen card's `address` resolving to "AUTODEAL" - a short, unrelated line near
+   the ID photo placeholder, in a totally different column from the real address value -
+   because `findValueNear`'s "below" distance measured the candidate's *center* x against
+   the label's *left* edge, letting a narrow off-column box beat the real (wide) value
+   whose own left edge actually lines up with the label.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

@@ -293,6 +293,9 @@ specimenPass = check("middle_name", specimenResult.common_fields.middle_name?.va
 specimenPass = check("sex", specimenResult.common_fields.sex?.value, "M") && specimenPass;
 specimenPass = check("date_of_birth", specimenResult.common_fields.date_of_birth?.value, "1987/10/04") && specimenPass;
 specimenPass = check("blood_type", specimenResult.common_fields.blood_type?.value, "O+") && specimenPass;
+specimenPass =
+  check("address", specimenResult.common_fields.address?.value, "UNIT/HOUSE NO.BUILDING, STREET NAME,") &&
+  specimenPass;
 specimenPass = check("nationality", specimenResult.variant_fields.nationality?.value, "PHL") && specimenPass;
 specimenPass = check("weight", specimenResult.variant_fields.weight?.value, "70") && specimenPass;
 specimenPass = check("height", specimenResult.variant_fields.height?.value, "1.55") && specimenPass;
@@ -376,4 +379,29 @@ if (!bilingualLabelPass) {
 }
 
 allPass = allPass && bilingualLabelPass;
+
+// === Left-align distance metric test (real DRIVERS_LICENSE bug report) ===
+// The specimen card's address resolved to "AUTODEAL" - a short, unrelated line sitting
+// far to the left near the ID photo placeholder - instead of the real address value
+// directly below the "Address" label. findValueNear's "below" distance measured the
+// candidate's CENTER x against the label's LEFT edge: "AUTODEAL" is a narrow box, so its
+// center ends up closer to the label's left edge by that measure, even though the real
+// (wide) address value's own LEFT edge lines up with the label almost exactly.
+// Real boxes from that report.
+const addressLines = [
+  line("Address", [217.61410361842104, 201.56588040865387, 266.9253700657895, 217.30431189903848]),
+  line("AUTODEAL", [104.25000000000001, 211.54423076923078, 180.9473684210526, 229.9942307692308]),
+  line("UNIT/HOUSE NO.BUILDING, STREET NAME,", [217.97921926587688, 216.7141818052796, 488.5997281025442, 233.69447204087427]),
+];
+const addressResult = extractFields(addressLines, "DRIVERS_LICENSE", "FRONT");
+
+console.log("\n=== Left-align distance metric test (real DRIVERS_LICENSE bug report) ===\n");
+const addressPass = check("address", addressResult.common_fields.address?.value, "UNIT/HOUSE NO.BUILDING, STREET NAME,");
+
+console.log(`\n${addressPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!addressPass) {
+  console.log("\nFull output:", JSON.stringify(addressResult, null, 2));
+}
+
+allPass = allPass && addressPass;
 process.exit(allPass ? 0 : 1);

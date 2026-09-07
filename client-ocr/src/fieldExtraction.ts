@@ -214,16 +214,22 @@ function findValueNear(
   candidates.forEach((cand, idx) => {
     if (usedIndices.has(idx) || cand === labelLine || !isAcceptable(cand)) return;
     const c = boxCenter(cand.boundingBox);
+    // "Left-aligned with the label" (the below case) means the candidate's own LEFT edge
+    // starts where the label's left edge does - compare edge to edge, not the
+    // candidate's center to the label's edge. A real bug report had "Address"'s value
+    // resolve to "AUTODEAL", a short unrelated line sitting in a totally different
+    // column (near the ID photo placeholder) - its narrow box happened to have a center
+    // x closer to the label's left edge than the real (wide) address value's center did,
+    // even though that value's own left edge lined up with the label almost exactly.
+    const leftAlignOffset = Math.abs(cand.boundingBox[0] - labelLine.boundingBox[0]);
     const sameRow = Math.abs(c.y - labelCenter.y) < labelHeight * 0.7;
     const toRight = c.x > labelLine.boundingBox[2] - 2;
-    const below = c.y > labelLine.boundingBox[3] - 2 && Math.abs(c.x - labelLine.boundingBox[0]) < labelHeight * 15;
+    const below = c.y > labelLine.boundingBox[3] - 2 && leftAlignOffset < labelHeight * 15;
 
     if (!((sameRow && toRight) || below)) return;
 
     const dist =
-      sameRow && toRight
-        ? c.x - labelLine.boundingBox[2]
-        : (c.y - labelLine.boundingBox[3]) * 3 + Math.abs(c.x - labelLine.boundingBox[0]);
+      sameRow && toRight ? c.x - labelLine.boundingBox[2] : (c.y - labelLine.boundingBox[3]) * 3 + leftAlignOffset;
     if (dist < 0) return;
 
     if (!best || dist < best.dist) best = { line: cand, index: idx, dist };
