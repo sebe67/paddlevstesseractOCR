@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.13.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.14.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -169,12 +169,33 @@ downloads of the model assets from a public GCS bucket.
   is correct; `recognize.ts` now auto-detects this per-timestep (checks whether a row
   already sums to ~1) rather than assuming, so it works correctly across both the v1.0
   and v1.1 model exports despite their different internal op-naming conventions.
+- **MIDV-500/MIDV-2019/MIDV-2020 (the standard academic ID-document OCR benchmarks)
+  checked and ruled out as a ground-truth source**: their combined 50 document types
+  span ~30 countries (Albania, Austria, Azerbaijan, Brazil, Chile, China, Czechia,
+  Germany, Algeria, Spain, Estonia, Finland, Greece, Croatia, Hungary, Iran, Italy,
+  Japan, Latvia, Macau, Moldova, Norway, Poland, Portugal, Romania, Russia, Serbia,
+  Slovakia, Turkey, Ukraine, Uruguay, USA) — none Philippine. Useful only as generic
+  pipeline-robustness data (perspective distortion, motion blur, video-stream capture),
+  not as PH field-extraction ground truth, since label text/layout is entirely
+  per-country.
+- **Added an automated specimen-accuracy harness** (`npm run test:specimens`,
+  `scripts/specimen-test.mjs`) that drives the real demo in a real Chromium (via
+  Playwright) against real/specimen ID photos and diffs the result against
+  hand-authored ground truth — see `specimens/README.md`. This is the automated version
+  of the same manual "run the demo, paste the JSON back" workflow used to find and fix
+  every bug above; it needs network access to fetch the OCR models, so it's a separate,
+  slower check from the logic-only regression test below, not a pre-push gate.
+- **`tsx` was never actually a declared dependency** despite `test:field-extraction`
+  needing it — it happened to already be present from an earlier ad-hoc install.
+  Installing `playwright` for the harness above surfaced this (npm pruned the
+  undeclared package on the next `npm install`, breaking the test script). Fixed by
+  adding `tsx` to `devDependencies` properly; `npm install` alone is now enough for
+  every script in this repo except `check:live-models`'s `sharp` (see below).
 
 ## Run the field-extraction regression test
 
 ```sh
 npm install
-npm install --save-dev tsx
 npm run test:field-extraction
 ```
 
@@ -256,15 +277,32 @@ Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — wor
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
 up as a crash, just confidently-wrong output.
 
-## Run the live model check
-
-This needs two extra dev tools (`tsx` to run TypeScript directly, `sharp` for image
-decoding) that aren't part of the default install, since they're only needed for this
-one verification script, not for actually using the library or running the demo:
+## Run the specimen accuracy test
 
 ```sh
 npm install
-npm install --save-dev tsx sharp
+npm run test:specimens
+```
+
+Drives the actual demo (`example/`) in a real Chromium via
+[Playwright](https://playwright.dev/) against real/specimen ID photos under
+`specimens/<ID_TYPE>/<case>/`, and diffs the extracted fields against a hand-authored
+`expected.json` ground truth — see `specimens/README.md` for the layout and how to add
+a specimen. Unlike the logic-only test above, this calls the real OCR models over the
+network (same as the demo does normally), so it's slower and meant for tracking
+accuracy against real specimens over time, not a pre-push gate. With no specimens on
+disk yet, it just reports that and exits — this repo doesn't ship any (see
+`specimens/README.md`'s privacy note on why real/specimen ID photos are gitignored).
+
+## Run the live model check
+
+This needs one extra dev tool (`sharp`, for image decoding) that isn't part of the
+default install, since it's only needed for this one verification script, not for
+actually using the library or running the demo:
+
+```sh
+npm install
+npm install --save-dev sharp
 npm run check:live-models
 ```
 

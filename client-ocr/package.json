@@ -1,6 +1,6 @@
 {
   "name": "id-ocr-web",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "private": true,
   "description": "Client-side (browser) OCR + field extraction for Philippine ID scans, using PaddleOCR PP-OCRv5 mobile det/rec models via onnxruntime-web. No image data leaves the device.",
   "type": "module",
@@ -10,12 +10,15 @@
     "build": "tsc -p tsconfig.json",
     "example": "vite",
     "check:live-models": "tsx scripts/live-model-check.mjs",
-    "test:field-extraction": "tsx scripts/field-extraction-test.mjs"
+    "test:field-extraction": "tsx scripts/field-extraction-test.mjs",
+    "test:specimens": "node scripts/specimen-test.mjs"
   },
   "dependencies": {
     "onnxruntime-web": "1.29.0"
   },
   "devDependencies": {
+    "playwright": "^1.56.1",
+    "tsx": "^4.23.13",
     "typescript": "^5.5.4",
     "vite": "^5.4.0"
   }
