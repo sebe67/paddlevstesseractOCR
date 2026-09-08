@@ -840,4 +840,73 @@ if (!prcPass) {
 }
 
 allPass = allPass && prcPass;
+
+// --- Regression guard for resolveMergedNameLabelRow's own row-finding geometry
+// (v1.18.0's fix for Postal ID, itself the cause of a real self-introduced regression
+// caught here): a driver's license photo, already covered by scenario 3 in a
+// simplified/reconstructed form, but reproduced here with the FULL real line set from
+// that same bug report, which is what actually triggered this specific failure. Its
+// merged label ("Last Name.Fint Nama.Middie Name") is genuinely a multi-field label -
+// resolveMergedNameLabelRow correctly recognizes that - but the real value line right
+// below it ("SILVA, SEBASTIAN VINCENT PABLO QUE", one comma-joined line) has its top
+// edge a few pixels *above* the label's own bottom (ordinary text ascender overlap),
+// which a flat "-2" pixel tolerance excluded; with that immediate line excluded, an
+// overly generous flat "labelHeight*3" downward reach then swept up an unrelated row
+// three fields further down (a Weight/Height label row) instead, wrongly treating it
+// as the name row - producing first_name="Ma", middle_name="Weignt (kg)",
+// last_name="Heghtm]" in a real user report on v1.18.0/v1.19.0, none of which are
+// anywhere close to the real name. Fixed by making both bounds relative to the
+// label's own height instead of fixed pixel margins - which correctly widens the
+// search just enough to find the one real adjacent line, and RESOLVES the "row" as
+// having fewer than 2 items, so this function correctly steps aside and lets the
+// regular per-field search + splitCommaSeparatedName handle it exactly as it did
+// before resolveMergedNameLabelRow existed at all.
+const dlFullLines = [
+  line("REPUBLIC OF THE PHILIPPINES", [382.42, 76.42, 1084.58, 117.08]),
+  line("DEPARTMENT OF TRANSPORTATION", [476.14, 113.14, 990.86, 146.36]),
+  line("LAND TRANSPORTATION OFFICE", [500.17, 141.67, 965.33, 174.83]),
+  line("DRIVER'S LICENSE", [546.58, 182.08, 971.42, 225.92]),
+  line("Last Name.Fint Nama.Middie Name", [542.18, 260.31, 1005.83, 295.0]),
+  line("SILVA, SEBASTIAN VINCENT PABLO QUE", [538.22, 288.03, 1366.79, 342.65]),
+  line("Ma", [543.91, 357.91, 666.59, 386.09], 0.36),
+  line("SRX", [722.2, 354.57, 776.13, 390.38], 0.38),
+  line("Date af Birth", [828.92, 351.92, 992.08, 390.58]),
+  line("Weignt (kg)", [1058.51, 352.01, 1210.99, 390.49]),
+  line("Heghtm]", [1229.37, 351.01, 1370.24, 391.96], 0.64),
+  line("PHL", [539.16, 387.66, 615.84, 431.34]),
+  line("M", [729.29, 387.29, 770.71, 427.21]),
+  line("2008/04/10", [825.97, 387.94, 1041.51, 432.36]),
+  line("64", [1109.06, 392.06, 1155.94, 426.94]),
+  line("191", [1264.1, 388.1, 1342.9, 429.4]),
+  line("3I6. M.HNFANTE, LITTLE BAGUIO,SAN JUAN", [540.52, 471.9, 1332.98, 517.04]),
+  line("GRTY,HCR,SECOND DISTRICT, IS0O", [538.45, 517.45, 1179.05, 558.05]),
+  line("L", [543.33, 570.33, 664.17, 595.17]),
+  line("Expiration Date", [861.14, 562.64, 1055.86, 598.36]),
+  line("Azency Code", [1128.35, 563.41, 1295.66, 599.96]),
+  line("N01-25-0235302030/04/10", [537.8, 591.43, 1079.22, 641.27]),
+  line("NO1", [1168.83, 595.83, 1252.17, 640.17]),
+  line("Miaen Tp", [540.64, 643.36, 681.38, 688.04], 0.46),
+  line("Eyes Calgr", [768.53, 647.03, 905.47, 681.97]),
+  line("B+", [583.16, 677.66, 636.34, 715.84]),
+  line("BROWN", [769.91, 675.41, 902.59, 716.59]),
+  line("m", [1075.44, 673.44, 1284.06, 768.06], 0.52),
+  line("B. Cads", [539.16, 726.66, 663.84, 761.34], 0.51),
+  line("Candinians", [771.56, 728.06, 905.44, 762.94]),
+  line("A", [1047.85, 729.85, 1086.65, 767.15]),
+];
+const dlFullResult = extractFields(dlFullLines, "DRIVERS_LICENSE", "FRONT");
+
+console.log("\n=== Real driver's license bug report (full line set) ===\n");
+let dlFullPass = true;
+dlFullPass = check("last_name", dlFullResult.common_fields.last_name?.value, "SILVA") && dlFullPass;
+dlFullPass =
+  check("first_name", dlFullResult.common_fields.first_name?.value, "SEBASTIAN VINCENT PABLO") && dlFullPass;
+dlFullPass = check("middle_name", dlFullResult.common_fields.middle_name?.value, "QUE") && dlFullPass;
+
+console.log(`\n${dlFullPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!dlFullPass) {
+  console.log("\nFull output:", JSON.stringify(dlFullResult, null, 2));
+}
+
+allPass = allPass && dlFullPass;
 process.exit(allPass ? 0 : 1);

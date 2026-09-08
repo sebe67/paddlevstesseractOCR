@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.19.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.20.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -306,6 +306,29 @@ downloads of the model assets from a public GCS bucket.
   this file to date - verified against the full regression suite below with zero
   regressions across all 8 previously-tested types.
   Still unvalidated: VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any type.
+- **Self-introduced regression on DRIVERS_LICENSE, found by re-testing an existing
+  working card against a new version rather than only testing new types** (v1.18.0's
+  Postal ID fix broke it; found on v1.19.0). `resolveMergedNameLabelRow`'s own
+  row-finding geometry used fixed pixel margins (`labelBottom - 2` down to
+  `labelBottom + labelHeight * 3`) rather than margins relative to the label's own
+  size. On a driver's license whose merged label ("Last Name.Fint Nama.Middie Name")
+  is genuinely multi-field - correctly recognized as such - the real value directly
+  below it (one comma-joined line, "SILVA, SEBASTIAN VINCENT PABLO QUE") has its top
+  edge a few pixels *above* the label's own bottom (ordinary text ascender overlap),
+  which the flat `-2` tolerance excluded; with that immediate line gone, the
+  overly-generous flat downward reach then swept up an unrelated row three fields
+  further down (a Weight/Height label row) and wrongly treated it as the name row -
+  `first_name` came back "Ma", `middle_name` "Weignt (kg)", `last_name` "Heghtm]".
+  Fixed by making both bounds relative to the label's own height; the one real
+  adjacent line is now found, and since it's a single line (not 2+ separate boxes),
+  `resolveMergedNameLabelRow` correctly recognizes this isn't its shape and steps
+  aside, letting the regular per-field search + `splitCommaSeparatedName` handle it
+  exactly as before this function existed. Confirmed by running the exact same real
+  lines through the last known-good version (v1.17.0) and comparing output directly,
+  not just re-running the existing test suite - which is what caught that this was a
+  regression rather than a new bug, and confirmed the fix restores (and on
+  `license_restrictions`, an unrelated field, actually improves on) v1.17.0's
+  behavior exactly.
 
 ## Run the field-extraction regression test
 
@@ -314,7 +337,7 @@ npm install
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with eighteen scenarios, each
+Pure logic test (no model, no browser, no network) with nineteen scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -437,6 +460,16 @@ reproducing a real bug report:
     "professional" in PRC's own letterhead text. The first two are now fixed outright;
     the third is correctly left unresolved (no real label exists for it on this card),
     which this scenario also asserts.
+19. A self-introduced regression on the DRIVERS_LICENSE card from scenario 3, this
+    time reproduced with the *full* real line set that same bug report contained (not
+    the simplified subset scenario 3 uses) - which is what it took to actually trigger
+    the failure. Scenario 17's `resolveMergedNameLabelRow` fix correctly recognized
+    the merged label here too, but its own row-finding geometry then excluded the real
+    adjacent value line (a few pixels of ordinary text-ascender overlap past a flat
+    pixel tolerance) and swept up an unrelated row three fields down instead -
+    `first_name`/`middle_name`/`last_name` came back "Ma"/"Weignt (kg)"/"Heghtm]" in a
+    real user report, on a card type that had worked correctly for many versions
+    before this one regressed it.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

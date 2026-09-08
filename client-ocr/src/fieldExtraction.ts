@@ -632,11 +632,24 @@ function resolveMergedNameLabelRow(
     const labelBottom = labelLine.boundingBox[3];
     const labelHeight = labelLine.boundingBox[3] - labelLine.boundingBox[1];
 
+    // Both bounds are relative to the label's own height, not fixed pixel margins - a
+    // flat "-2" was too tight to catch a real bug report's immediately-adjacent value
+    // line (a driver's license photo where a genuinely merged "Last Name.Fint
+    // Nama.Middie Name" label's very next line, "SILVA, SEBASTIAN VINCENT PABLO QUE",
+    // has its top edge a few pixels *above* the label's own bottom - ordinary text
+    // ascender overlap), and a flat "labelHeight*3" reach was generous enough that once
+    // that immediate line got excluded, the search kept going and swept up an unrelated
+    // row three fields further down (a weight/height label row) instead, wrongly
+    // treating it as the name row.
     const rowIndices: number[] = [];
     for (let j = 0; j < lines.length; j++) {
       if (used.has(j) || j === i) continue;
       const top = lines[j].boundingBox[1];
-      if (top > labelBottom - 2 && top < labelBottom + labelHeight * 3 && !isLabelOnlyText(lines[j].text, allAliasLists)) {
+      if (
+        top > labelBottom - labelHeight * 0.5 &&
+        top < labelBottom + labelHeight * 1.5 &&
+        !isLabelOnlyText(lines[j].text, allAliasLists)
+      ) {
         rowIndices.push(j);
       }
     }
