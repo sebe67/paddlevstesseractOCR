@@ -769,4 +769,75 @@ if (!postalPass) {
 }
 
 allPass = allPass && postalPass;
+
+// --- Real PRC ID bug report, three independent bugs at once:
+// 1. findValueNear compared a same-row-to-the-right match against an above/below match
+//    on the SAME numeric scale, even though the two use different distance formulas -
+//    "LAST NAME"'s value resolved to a stray line of background microprint noise
+//    sitting well above the label (whose left edge happened to align almost exactly
+//    with the label's, producing a deceptively small "dist" via the vertical-gap
+//    formula) instead of "DELA CRUZ", the correct value sitting right beside it on the
+//    same row. Same bug independently broke "MIDDLE NAME", which resolved to
+//    "REGISTRATION NO." (the next label down) instead of "SANTOS" beside it.
+// 2. "REGISTRATION DATE" fuzzy-matched expiry_date's "expiration date" alias (both
+//    share a long "...ration date" tail) closely enough to claim it before
+//    expiry_date's own correct "VALID UNTIL" label was ever reached, so expiry_date
+//    resolved to the registration date's value instead of the real expiry value.
+// 3. prc_profession's "profession" alias matched the first ten characters of
+//    "PROFESSIONAL REGULATION COMMISSION" - the id_type's own fixed letterhead text on
+//    every PRC card - since "profession" is a genuine prefix of the unrelated, longer
+//    word "professional". fuzzyMatchPrefix now requires a real word boundary
+//    immediately after a match, and rejects a longer fuzzy window whose "extra"
+//    characters are just more letters of the same word rather than something genuinely
+//    separating two words - the "professional" collision needs both: it fails the
+//    plain length-10 boundary check (following character "a" continues the word), and
+//    the length-12 window "professional" fails the extra-absorption check (no
+//    punctuation between position 10 and 12). prc_profession is correctly left
+//    unresolved rather than guessed at - the real card prints "PROFESSIONAL TEACHER"
+//    with no label at all next to it, the same kind of gap as PhilHealth's unlabeled
+//    fields, not something this fix attempts to recover.
+const prcLines = [
+  line("Republic of the Philippines", [313.93, 38.43, 516.99, 55.34]),
+  line("PROFESSIONAL REGULATION COMMISSION", [126.84, 56.89, 692.96, 81.31]),
+  line("PROFESSIONAL IDENTIFICATION CARD", [176.06, 86.26, 648.8, 108.21]),
+  line("mCO", [24.19, 120.39, 57.59, 127.38], 0.34),
+  line("NUALROR.ATONOO", [151.29, 120.28, 222.27, 127.49], 0.54),
+  line("DIenmco", [236.13, 120.32, 287.86, 127.45], 0.43),
+  line("mmes", [288.58, 120.27, 370.7, 127.5], 0.35),
+  line("DLIE.ATNOC", [373.4, 120.27, 448.43, 127.5], 0.51),
+  line("umtormemm", [490.53, 120.29, 556.44, 127.48], 0.46),
+  line("LAST NAME", [235.41, 143.3, 326.95, 159.75]),
+  line("DELA CRUZ", [429.27, 143.31, 517.75, 159.74]),
+  line("FIRST NAME", [236.77, 180.17, 333.66, 198.89]),
+  line("JUAN", [428.71, 179.29, 474.89, 198.78]),
+  line("MIDDLE NAME", [236.68, 215.61, 353.95, 234.52]),
+  line("SANTOS", [428.24, 217.39, 495.52, 238.3]),
+  line("REGISTRATION NO.", [236.25, 253.69, 386.68, 270.47]),
+  line("0000001", [428.93, 253.54, 488.81, 271.62]),
+  line("REGISTRATION DATE", [236.23, 289.21, 397.8, 306.03]),
+  line("01/01/2000", [428.33, 288.49, 505.57, 304.78]),
+  line("VALID UNTIL", [235.74, 319.33, 336.71, 338.1]),
+  line("2", [407.55, 318.51, 424.37, 332.99], 0.09),
+  line("01/01/2026", [428.32, 320.07, 506.58, 336.38]),
+  line("PROFESSIONAL TEACHER", [274.79, 365.41, 562.18, 384.81]),
+  line("Date Generated: Feb 27, 2023", [316.95, 493.5, 522.04, 510.41]),
+];
+const prcResult = extractFields(prcLines, "PRC", "FRONT");
+
+console.log("\n=== Real PRC ID bug report ===\n");
+let prcPass = true;
+prcPass = check("last_name", prcResult.common_fields.last_name?.value, "DELA CRUZ") && prcPass;
+prcPass = check("first_name", prcResult.common_fields.first_name?.value, "JUAN") && prcPass;
+prcPass = check("middle_name", prcResult.common_fields.middle_name?.value, "SANTOS") && prcPass;
+prcPass = check("id_number", prcResult.variant_fields.id_number?.value, "0000001") && prcPass;
+prcPass = check("issue_date", prcResult.variant_fields.issue_date?.value, "01/01/2000") && prcPass;
+prcPass = check("expiry_date", prcResult.variant_fields.expiry_date?.value, "01/01/2026") && prcPass;
+prcPass = check("prc_profession", prcResult.variant_fields.prc_profession?.value, undefined) && prcPass;
+
+console.log(`\n${prcPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!prcPass) {
+  console.log("\nFull output:", JSON.stringify(prcResult, null, 2));
+}
+
+allPass = allPass && prcPass;
 process.exit(allPass ? 0 : 1);

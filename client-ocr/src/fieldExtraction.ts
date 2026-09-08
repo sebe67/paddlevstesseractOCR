@@ -64,6 +64,16 @@ const FUZZY_EDIT_RATIO = 0.3;
 // in idTypeAliases.ts ("sex", "weight", "height", "tin", "pin", "crn", "dob", "id no", ...).
 const SHORT_ALIAS_MAX_LENGTH = 6;
 
+// True if `ch` is a genuine word boundary (a non-letter/digit character, or past the end
+// of the string) rather than the middle of a longer word. A real bug report had PRC's
+// "profession" alias match the first ten characters of "PROFESSIONAL REGULATION
+// COMMISSION" (the id_type's own fixed letterhead text, present on every PRC card) -
+// "profession" is a genuine prefix of the unrelated, longer English word
+// "professional", not a garbled OCR read of an actual profession label.
+function isWordBoundaryChar(ch: string | undefined): boolean {
+  return ch === undefined || !/[a-z0-9]/i.test(ch);
+}
+
 /**
  * Fuzzy prefix match: does `text` start with something close enough to `alias` to call it
  * the same label? Tries exact match first (fast path), then - since a garbled label can
@@ -74,7 +84,9 @@ const SHORT_ALIAS_MAX_LENGTH = 6;
  * `alias.length`.
  */
 function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matchedLength: number; exact: boolean } {
-  if (text.startsWith(alias)) return { matched: true, matchedLength: alias.length, exact: true };
+  if (text.startsWith(alias) && isWordBoundaryChar(text[alias.length])) {
+    return { matched: true, matchedLength: alias.length, exact: true };
+  }
 
   const threshold = Math.max(1, Math.round(alias.length * FUZZY_EDIT_RATIO));
 
@@ -101,7 +113,7 @@ function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matc
   if (isShortAlias) {
     if (alias.length > text.length) return { matched: false, matchedLength: 0, exact: false };
     const dist = levenshtein(text.slice(0, alias.length), alias);
-    return dist <= threshold
+    return dist <= threshold && isWordBoundaryChar(text[alias.length])
       ? { matched: true, matchedLength: alias.length, exact: false }
       : { matched: false, matchedLength: 0, exact: false };
   }
@@ -115,6 +127,13 @@ function fuzzyMatchPrefix(text: string, alias: string): { matched: boolean; matc
   const hi = alias.length + 3;
   let best: { len: number; dist: number } | undefined;
   for (let len = lo; len <= Math.min(hi, text.length); len++) {
+    if (!isWordBoundaryChar(text[len])) continue;
+    // A window longer than the alias itself is only trustworthy if something other than
+    // plain letters/digits separates the alias's own length from where this window ends
+    // - otherwise the "extra" characters are just continuing one single longer word (the
+    // "profession"/"professional" case above), not slack for a dropped character the way
+    // a *shorter* window is.
+    if (len > alias.length && !/[^a-z0-9]/i.test(text.slice(alias.length, len))) continue;
     const dist = levenshtein(text.slice(0, len), alias);
     if (!best || dist < best.dist) best = { len, dist };
   }
@@ -253,7 +272,20 @@ function findValueNear(
 ): { line: RecognizedTextLine; index: number } | undefined {
   const labelCenter = boxCenter(labelLine.boundingBox);
   const labelHeight = labelLine.boundingBox[3] - labelLine.boundingBox[1];
-  let best: { line: RecognizedTextLine; index: number; dist: number } | undefined;
+  // Same-row-to-the-right and above/below are tracked as two separate "best" contests,
+  // not one combined comparison - their distance formulas aren't on the same scale (one
+  // is a plain x-gap, the other is a weighted vertical-gap-plus-left-offset), so a
+  // same-row match can end up with a numerically *larger* "dist" than a candidate that's
+  // actually in the wrong place entirely. A real bug report had a PRC ID's "LAST NAME"
+  // value resolve to a stray line of background microprint noise sitting well above the
+  // label, purely because that noise line's left edge happened to align almost exactly
+  // with the label's - beating out "DELA CRUZ", the correct value sitting right beside
+  // it on the same row, on raw distance alone. Same-row-to-the-right is always the more
+  // confident shape when it exists at all (every previously-fixed layout that reads
+  // "beside" rather than "above/below" relies on it), so it wins outright whenever
+  // there's a same-row candidate, regardless of how the numbers compare.
+  let bestSameRow: { line: RecognizedTextLine; index: number; dist: number } | undefined;
+  let bestVertical: { line: RecognizedTextLine; index: number; dist: number } | undefined;
 
   candidates.forEach((cand, idx) => {
     if (usedIndices.has(idx) || cand === labelLine || !isAcceptable(cand)) return;
@@ -272,7 +304,7 @@ function findValueNear(
     if (sameRow && toRight) {
       const dist = c.x - labelLine.boundingBox[2];
       if (dist < 0) return;
-      if (!best || dist < best.dist) best = { line: cand, index: idx, dist };
+      if (!bestSameRow || dist < bestSameRow.dist) bestSameRow = { line: cand, index: idx, dist };
       return;
     }
 
@@ -285,10 +317,10 @@ function findValueNear(
     if (verticalGap < -2 || leftAlignOffset >= labelHeight * 15) return;
 
     const dist = verticalGap * 3 + leftAlignOffset;
-    if (!best || dist < best.dist) best = { line: cand, index: idx, dist };
+    if (!bestVertical || dist < bestVertical.dist) bestVertical = { line: cand, index: idx, dist };
   });
 
-  return best;
+  return bestSameRow ?? bestVertical;
 }
 
 // Fields whose printed value routinely wraps across more than one detected text line -

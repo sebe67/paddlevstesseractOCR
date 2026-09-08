@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.18.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.19.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -265,7 +265,47 @@ downloads of the model assets from a public GCS bucket.
   `last_name` (PH surnames routinely being 2+ words, e.g. "DELA CRUZ") unless the last
   box is a recognized suffix token ("JR"/"SR"/"II"/"III"/"IV"), which becomes
   `name_extension` instead.
-  Still unvalidated: PRC/VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any type.
+  Still unvalidated (at the time): PRC/VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of
+  any type.
+- **Tested against a real PRC ID FRONT photo.** Three independent bugs at once:
+  1. `findValueNear` compared a same-row-to-the-right match against an above/below match
+     on the same numeric scale, even though the two use different distance formulas -
+     `last_name` resolved to a stray line of background microprint noise sitting well
+     above the label (its left edge coincidentally aligning closely with the label's,
+     producing a deceptively small "dist" via the vertical-gap formula) instead of
+     "DELA CRUZ", the correct value sitting right beside it on the same row.
+     `middle_name` broke the same way, resolving to "REGISTRATION NO." (the next label
+     down) instead of "SANTOS" beside it - this is the inconsistency between
+     `first_name` (which happened not to have a competing vertical candidate nearby, so
+     it worked) and `middle_name` (which did). Fixed by tracking the same-row and
+     above/below candidates as two *separate* contests rather than one shared "smallest
+     number wins" comparison - same-row-to-the-right now always wins outright whenever
+     it exists at all, matching every other layout already fixed this session that
+     reads "beside" rather than "above/below."
+  2. `"REGISTRATION DATE"` fuzzy-matched `expiry_date`'s `"expiration date"` alias
+     closely enough (both share a long "...ration date" tail) to claim it before
+     `expiry_date`'s own correct `"VALID UNTIL"` label was ever reached, so
+     `expiry_date` resolved to the registration date's value instead of the real expiry
+     value. Fixed by adding `"registration date"` as an `issue_date` alias (PRC's own
+     term for what other types call "date issued") and making `issue_date` applicable
+     to PRC, ordered before `expiry_date` - it now correctly claims that line first.
+  3. `prc_profession`'s `"profession"` alias matched the first ten characters of
+     `"PROFESSIONAL REGULATION COMMISSION"` - PRC's own fixed letterhead text, present
+     on every PRC card - since "profession" is a genuine prefix of the unrelated,
+     longer word "professional". `fuzzyMatchPrefix` now requires a real word boundary
+     immediately after any match, and rejects a longer fuzzy window whose "extra"
+     characters are just more letters of the same word rather than something genuinely
+     separating two words. `prc_profession` is correctly left unresolved rather than
+     guessed at once the false match is excluded - the real card prints "PROFESSIONAL
+     TEACHER" with no label at all next to it, the same kind of gap as PhilHealth's
+     unlabeled fields, and not something this fix attempts to recover (no confirmed-
+     correct position pattern to anchor on yet, unlike PhilHealth's fixed printed form).
+  Also added `"registration no"` as an `id_number` alias (the literal PRC label text),
+  which was separately unresolved. `findValueNear` and `fuzzyMatchPrefix` are shared by
+  every field on every id_type, so fixes 1 and 3 are the broadest-reaching changes in
+  this file to date - verified against the full regression suite below with zero
+  regressions across all 8 previously-tested types.
+  Still unvalidated: VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any type.
 
 ## Run the field-extraction regression test
 
@@ -274,7 +314,7 @@ npm install
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with seventeen scenarios, each
+Pure logic test (no model, no browser, no network) with eighteen scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -387,6 +427,16 @@ reproducing a real bug report:
     single-field label (PhilSys's `"Gitnang Apelyido/Middle Name"`), wrongly replacing
     already-correct fields elsewhere on a *different* real card - caught by the
     existing PhilSys scenario before it ever reached this repo's history.
+18. A real PRC ID photo, three independent bugs at once: `findValueNear` picking a
+    same-row-to-the-right match against an above/below match on the same numeric
+    scale (so `last_name`/`middle_name` resolved to background noise or the next
+    label down instead of the correct value right beside each label);
+    `"REGISTRATION DATE"` fuzzy-colliding with `expiry_date`'s `"expiration date"`
+    alias before its own `"VALID UNTIL"` label was reached; and `prc_profession`'s
+    `"profession"` alias matching the first ten characters of the unrelated word
+    "professional" in PRC's own letterhead text. The first two are now fixed outright;
+    the third is correctly left unresolved (no real label exists for it on this card),
+    which this scenario also asserts.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
