@@ -14,10 +14,12 @@ import type {
   IdType,
   PhIdOcrResult,
   RecognizedTextLine,
+  RequiredCommonFields,
   VariantFields,
 } from "./types";
+import { LIBRARY_VERSION } from "./version";
 
-const ENGINE_VERSION = "id-ocr-web/ppocrv5-mobile-onnxruntime-web@1.0.0";
+const ENGINE_VERSION = `id-ocr-web@${LIBRARY_VERSION} (ppocrv5-mobile/onnxruntime-web)`;
 const REC_LINE_HEIGHT = 48;
 
 /** Point onnxruntime-web at wherever you host its .wasm binaries (npm package's dist/, or a CDN). Call once at app startup. */
@@ -92,7 +94,7 @@ export async function runIdOcr(
   }
 
   const idType = options.idType ?? detectIdType(lines);
-  const { common_fields, variant_fields } = extractFields(lines, idType, side);
+  const { common_fields, variant_fields } = extractFields(lines, idType, side, { width: canvas.width, height: canvas.height });
   const rawOcrText = lines.map((l) => l.text).join("\n");
 
   if (idType === "PASSPORT") {
@@ -133,32 +135,45 @@ const REQUIRED_COMMON_FIELDS: (keyof CommonFields)[] = ["first_name", "last_name
  * found are filled with an empty, zero-confidence placeholder rather than omitted.
  */
 export function mergeIdOcrResults(results: RunIdOcrResult[]): PhIdOcrResult {
-  const merged: PhIdOcrResult = { common_fields: {}, variant_fields: {}, document_provenance: [] };
+  const commonFields: CommonFields = {};
+  const variantFields: VariantFields = {};
+  const provenance: DocumentProvenanceEntry[] = [];
+  let idType: IdType | undefined;
 
   for (const r of results) {
-    if (r.idType && !merged.id_type) merged.id_type = r.idType;
+    if (r.idType && !idType) idType = r.idType;
 
     for (const [key, field] of Object.entries(r.common_fields) as [keyof CommonFields, CommonFields[keyof CommonFields]][]) {
       if (!field) continue;
-      const existing = merged.common_fields[key];
-      if (!existing || field.confidence > existing.confidence) merged.common_fields[key] = field;
+      const existing = commonFields[key];
+      if (!existing || field.confidence > existing.confidence) commonFields[key] = field;
     }
     for (const [key, field] of Object.entries(r.variant_fields) as [keyof VariantFields, VariantFields[keyof VariantFields]][]) {
       if (!field) continue;
-      const existing = merged.variant_fields![key];
-      if (!existing || field.confidence > existing.confidence) merged.variant_fields![key] = field;
+      const existing = variantFields[key];
+      if (!existing || field.confidence > existing.confidence) variantFields[key] = field;
     }
-    merged.document_provenance!.push(r.provenance);
+    provenance.push(r.provenance);
   }
 
   for (const field of REQUIRED_COMMON_FIELDS) {
-    merged.common_fields[field] ??= { value: "", confidence: 0 };
+    commonFields[field] ??= { value: "", confidence: 0 };
   }
 
-  return merged;
+  return {
+    id_type: idType,
+    // Safe cast: the loop above unconditionally sets first_name, last_name, and
+    // date_of_birth, so commonFields now satisfies RequiredCommonFields even though
+    // TS can't see that guarantee across the loop boundary.
+    common_fields: commonFields as RequiredCommonFields,
+    variant_fields: variantFields,
+    document_provenance: provenance,
+  };
 }
 
 export { defaultModelConfig } from "./config";
+export { registerId, RegistrationError, DEFAULT_REGISTRATION_ENDPOINT } from "./registration";
+export type { RegistrationEnvelope, RegistrationSuccessResponse } from "./registration";
 export type {
   CommonFields,
   DocumentProvenanceEntry,
@@ -167,5 +182,10 @@ export type {
   OcrField,
   PhIdOcrResult,
   RecognizedTextLine,
+  RequiredCommonFields,
   VariantFields,
 } from "./types";
+export { ID_TEMPLATES } from "./idTemplates";
+export type { IdTemplate, TemplateRegion } from "./idTemplates";
+export type { ImageSize } from "./fieldExtraction";
+export { LIBRARY_VERSION } from "./version";

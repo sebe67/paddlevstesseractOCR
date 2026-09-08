@@ -31,9 +31,13 @@ const DEFAULTS: Required<DetectOptions> = {
 };
 
 /**
- * Runs the PP-OCRv5 (DB-based) detection model and post-processes its probability map
- * into text-line boxes, mirroring PaddleOCR's DBPostProcess: binarize -> connected
- * components -> minAreaRect -> score/size filter -> unclip -> rescale to source image.
+ * Runs the deployed DB-based PaddleOCR detection model and post-processes its
+ * probability map into text-line boxes, mirroring PaddleOCR's DBPostProcess: binarize
+ * -> connected components -> minAreaRect -> score/size filter -> unclip -> rescale to
+ * source image. (This DB-postprocessing shape is shared across PaddleOCR det model
+ * versions - unlike the rec model, det model version can't be confirmed just from its
+ * output shape, so no version claim is made here; see README Status for what has and
+ * hasn't been verified.)
  */
 export async function detectTextLines(
   session: ort.InferenceSession,

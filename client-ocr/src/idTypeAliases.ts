@@ -31,7 +31,7 @@ export type FieldAliasMap = Record<string, string[]>;
 
 export const COMMON_FIELD_ALIASES: FieldAliasMap = {
   last_name: ["surname", "last name", "apelyido"],
-  first_name: ["given name", "given names", "first name", "pangalan"],
+  first_name: ["given name", "given names", "first name", "pangalan", "mga pangalan"],
   middle_name: ["middle name", "gitnang apelyido", "gitnang pangalan"],
   name_extension: ["ext name", "suffix", "name extension"],
   date_of_birth: ["date of birth", "birth date", "petsa ng kapanganakan", "kapanganakan", "dob"],
@@ -52,8 +52,9 @@ export const VARIANT_FIELD_ALIASES: FieldAliasMap = {
     "philhealth no",
     "pin",
     "precinct no",
+    "registration no",
   ],
-  issue_date: ["date issued", "issue date", "petsa ng pagkakalabas"],
+  issue_date: ["date issued", "issue date", "petsa ng pagkakalabas", "registration date"],
   expiry_date: ["date of expiry", "expiry date", "valid until", "expiration date"],
   place_of_birth: ["place of birth", "lugar ng kapanganakan"],
   civil_status: ["civil status", "katayuang sibil"],
@@ -72,7 +73,7 @@ export const VARIANT_FIELDS_BY_ID_TYPE: Record<IdType, string[]> = {
   UMID: ["id_number"],
   DRIVERS_LICENSE: ["id_number", "expiry_date", "nationality", "weight", "height", "license_restrictions", "civil_status"],
   PASSPORT: ["id_number", "issue_date", "expiry_date", "nationality", "place_of_birth"],
-  PRC: ["id_number", "expiry_date", "prc_profession"],
+  PRC: ["id_number", "issue_date", "expiry_date", "prc_profession"],
   POSTAL: ["id_number", "expiry_date"],
   VOTERS: ["id_number"],
   SSS: ["id_number"],
