@@ -165,12 +165,16 @@ function isLabelOnlyText(text: string, allAliasLists: string[][]): boolean {
 // value can still have noise) - this only screens out candidates that couldn't possibly
 // be right, not ones that merely look unusual.
 const NUMERIC_VALUE_PATTERN = /^\d+(\.\d+)?\s*[a-zA-Z]{0,3}$/;
-// Two accepted shapes: numeric with slash/dash/dot separators ("2022/10/04"), or day +
+// Three accepted shapes: numeric with slash/dash/dot separators ("2022/10/04"); day +
 // month-name + year ("11 JULY1998", "16 MAR 1980" - a real TIN ID and a real passport
-// both print birthdates this way). The month-name form's day/year don't always have a
-// space from the month in the OCR output ("JULY1998" with no space before the year) -
-// \s* rather than \s+ between the month name and the year accounts for that.
-const DATE_VALUE_PATTERN = /\d{2,4}[/\-.]\d{1,2}[/\-.]\d{1,4}|\d{1,2}\s+[A-Za-z]{3,9}\.?\s*\d{4}/;
+// both print birthdates this way); or month-name + day + year ("JANUARY01,1990" - a
+// real PhilSys ID, month first this time). Spacing around the day/year is inconsistent
+// in the OCR output in both orders ("JULY1998" with no space before the year,
+// "JANUARY01,1990" with no space before the day and a comma instead of a space before
+// the year) - \s* rather than \s+ around the day and year, and an optional comma,
+// accounts for that.
+const DATE_VALUE_PATTERN =
+  /\d{2,4}[/\-.]\d{1,2}[/\-.]\d{1,4}|\d{1,2}\s+[A-Za-z]{3,9}\.?\s*\d{4}|[A-Za-z]{3,9}\.?\s*\d{1,2},?\s*\d{4}/;
 // "M"/"F" (every real example seen so far), plus the spelled-out English/Filipino words
 // in case some layout prints those instead - never a whole place name or anything else
 // multi-word. A real bug report had a passport's sex resolve to "MANILA" (its actual

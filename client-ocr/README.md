@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.14.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.15.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -161,7 +161,7 @@ downloads of the model assets from a public GCS bucket.
   not a slash-separated numeric date), was still being rejected by `date_of_birth`'s
   shape validator, which only accepted the numeric form — left the field unresolved
   with no fallback (TIN IDs have no MRZ). `DATE_VALUE_PATTERN` now accepts both shapes.
-  Still unvalidated: PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/PHILHEALTH/SENIOR_CITIZEN, and
+  Still unvalidated (at the time): PHILSYS/UMID/PRC/POSTAL/VOTERS/SSS/PHILHEALTH/SENIOR_CITIZEN, and
   the BACK side of any type.
 - **Confidence scores are now meaningful** (fixed while validating v1.0, and re-confirmed
   against v1.1's differently-named output tensor). Some PaddleOCR rec exports apply
@@ -191,6 +191,25 @@ downloads of the model assets from a public GCS bucket.
   undeclared package on the next `npm install`, breaking the test script). Fixed by
   adding `tsx` to `devDependencies` properly; `npm install` alone is now enough for
   every script in this repo except `check:live-models`'s `sharp` (see below).
+- **Tested against a real PHILSYS (National ID) FRONT photo** — the first non-
+  DRIVERS_LICENSE/PASSPORT/PWD/TIN type tested. Two real bugs found and fixed:
+  `first_name` never resolved because the card prints `"Mga Pangalan/Given Names"` —
+  Filipino grammar requires the plural article "Mga" before "Pangalan" — and label
+  matching only ever checks whether a line *starts with* an alias, never a substring
+  further in, so none of `first_name`'s aliases ("given name(s)", "pangalan") matched
+  with "Mga " sitting in front. With `first_name` never resolved, the last-resort
+  undivided-name splitter (meant for single-line names with no separate label, like
+  PWD's) ran on `last_name`'s own already-correct two-word value ("DELA CRUZ") since it
+  looked like `first_name` was still empty — wrongly splitting it into `first_name` =
+  "DELA" / `last_name` = "CRUZ" instead of leaving the correct "DELA CRUZ" alone. Fixed
+  by adding "mga pangalan" as an explicit alias (same fix shape as the earlier bilingual
+  "Kasarian/Sex" label bug). Separately, `date_of_birth` came back blank: the printed
+  value, "JANUARY01,1990" (month name immediately followed by day with no space, then a
+  comma before the year), didn't match `DATE_VALUE_PATTERN`'s existing shapes — it only
+  covered numeric dates and *day*-first month-name dates, not month-first. Fixed by
+  adding a month-first alternative to the pattern.
+  Still unvalidated: UMID/PRC/POSTAL/VOTERS/SSS/PHILHEALTH/SENIOR_CITIZEN, and the BACK
+  side of any type.
 
 ## Run the field-extraction regression test
 
@@ -199,7 +218,7 @@ npm install
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with thirteen scenarios, each
+Pure logic test (no model, no browser, no network) with fourteen scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -272,6 +291,18 @@ reproducing a real bug report:
     validator gap this same report surfaced once the label was fixed: a day + month-
     name + year date ("11 JULY1998") was being rejected for not being the
     slash-separated numeric form.
+14. A real PhilSys (National ID) photo, the first non-DRIVERS_LICENSE/PASSPORT/PWD/TIN
+    type tested: `first_name` never resolved because the card's actual printed label is
+    "Mga Pangalan/Given Names" (Filipino grammar puts the plural article "Mga" before
+    "Pangalan") and label matching only checks whether a line *starts with* an alias,
+    never a substring further in - so with `first_name` unresolved, the last-resort
+    undivided-name splitter (meant for single-line names with no separate label) ran on
+    `last_name`'s own already-correct value ("DELA CRUZ") instead, wrongly splitting it
+    into `first_name`/`last_name` = "DELA"/"CRUZ". A second, independent bug in the same
+    report: `date_of_birth` came back blank because its value, "JANUARY01,1990" (month
+    name immediately followed by day with no space, comma before the year), didn't
+    match any of the date-shape validator's existing patterns - all day-first or purely
+    numeric, none month-first.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

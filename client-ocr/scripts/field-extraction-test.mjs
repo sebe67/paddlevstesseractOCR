@@ -575,4 +575,52 @@ if (!tinIdPass) {
 }
 
 allPass = allPass && tinIdPass;
+
+// --- Real PhilSys (National ID) bug report: "Mga Pangalan/Given Names" (the plural
+// Filipino article "Mga" in front of "Pangalan") never matched first_name's aliases,
+// since label matching only checks whether a line *starts with* an alias - all of
+// "given name"/"given names"/"pangalan" sit after "Mga ", not at position 0. With
+// first_name never resolved by the main pass, the last-resort splitUndividedName step
+// (meant for undivided single-line names) ran on last_name's own two-word value
+// ("DELA CRUZ") since it looked like first_name was still empty - wrongly splitting it
+// into first_name="DELA"/last_name="CRUZ" and stomping the already-correct last_name.
+// Also covers a second, independent bug the same report surfaced: date_of_birth's
+// value, "JANUARY01,1990" (month name immediately followed by day, no space, then a
+// comma before the year), didn't match DATE_VALUE_PATTERN's day-first-or-numeric
+// shapes, so the field was left blank entirely.
+const philsysLines = [
+  line("REPUBLIKANG PILIPINAS", [265.65, 29.79, 474.36, 46.84]),
+  line("Republic of the Philippines", [286.75, 48.74, 454.26, 65.71]),
+  line("PAMBANSANGPAGKAKAKILANLAN", [224.49, 67.55, 517.53, 84.71]),
+  line("Philippine Identification Card", [279.71, 85.54, 461.29, 102.55]),
+  line("1234-5678-9101-1213", [76.48, 124.67, 257.43, 144.03]),
+  line("Apelyido/Last Name", [340.96, 140.36, 471.24, 157.2]),
+  line("DELA CRUZ", [339.76, 153.51, 435.45, 176.3]),
+  line("Mga Pangalan/Given Names", [341.58, 183.77, 515.74, 198.38]),
+  line("JUAN", [340.44, 196.57, 390.54, 216.44]),
+  line("5", [127.79, 217.32, 202.52, 271.17], 0.15),
+  line("Gitnang Apelyido/Middle Name", [340.17, 242.08, 537.21, 261.49]),
+  line("MARTINEZ", [340.46, 258.29, 432.63, 277.12]),
+  line("Petsa ng Kapanganakan/Date of Birth", [340.83, 284.54, 573.64, 301.63]),
+  line("JANUARY01,1990", [342.25, 299.87, 497.03, 319.14]),
+  line("PHL", [611.73, 309.62, 668.64, 342.49]),
+  line("Tirahan/Address", [108.07, 328.19, 209.8, 342.57]),
+  line("833SISA ST. BRGY 526,ZONES2SAMPALOK,MANILA", [107.4, 341.46, 553.39, 361.15]),
+  line("CITY,METRO MANILA", [108.57, 360.53, 289.51, 379.89]),
+];
+const philsysResult = extractFields(philsysLines, "PHILSYS", "FRONT");
+
+console.log("\n=== Real PhilSys ID bug report ===\n");
+let philsysPass = true;
+philsysPass = check("last_name", philsysResult.common_fields.last_name?.value, "DELA CRUZ") && philsysPass;
+philsysPass = check("first_name", philsysResult.common_fields.first_name?.value, "JUAN") && philsysPass;
+philsysPass = check("middle_name", philsysResult.common_fields.middle_name?.value, "MARTINEZ") && philsysPass;
+philsysPass = check("date_of_birth", philsysResult.common_fields.date_of_birth?.value, "JANUARY01,1990") && philsysPass;
+
+console.log(`\n${philsysPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!philsysPass) {
+  console.log("\nFull output:", JSON.stringify(philsysResult, null, 2));
+}
+
+allPass = allPass && philsysPass;
 process.exit(allPass ? 0 : 1);

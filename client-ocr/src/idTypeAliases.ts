@@ -31,7 +31,7 @@ export type FieldAliasMap = Record<string, string[]>;
 
 export const COMMON_FIELD_ALIASES: FieldAliasMap = {
   last_name: ["surname", "last name", "apelyido"],
-  first_name: ["given name", "given names", "first name", "pangalan"],
+  first_name: ["given name", "given names", "first name", "pangalan", "mga pangalan"],
   middle_name: ["middle name", "gitnang apelyido", "gitnang pangalan"],
   name_extension: ["ext name", "suffix", "name extension"],
   date_of_birth: ["date of birth", "birth date", "petsa ng kapanganakan", "kapanganakan", "dob"],
