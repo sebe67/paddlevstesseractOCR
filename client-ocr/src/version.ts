@@ -4,4 +4,4 @@
  * commit was this." Keep this in sync with package.json's "version" field - there's no
  * build step wiring the two together, so both need updating by hand together.
  */
-export const LIBRARY_VERSION = "1.16.0";
+export const LIBRARY_VERSION = "1.17.0";

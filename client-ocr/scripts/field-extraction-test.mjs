@@ -668,4 +668,49 @@ if (!philhealthPass) {
 }
 
 allPass = allPass && philhealthPass;
+
+// --- Real UMID bug report: "Sex"/"Date of Birth" fused onto one line with no space at
+// all between either label and its value ("SEX M DATEOF BIRTH LAGOXOL/2B"). The
+// regular per-field search does match "sex" as this line's own label (it's the exact
+// start of the line), but the leftover remainder is the entire rest of the line, which
+// fails sex's own value-shape validator and gets discarded outright rather than
+// pulling just "M" out of it - splitFusedSexDob recovers that. The printed
+// date_of_birth value itself was misread by the recognizer as "LAGOXOL/2B" - not a
+// garbled-but-recoverable date, just wrong characters - so it's correctly left
+// unresolved rather than accepting recognition garbage as a birthdate.
+const umidLines = [
+  line("NG", [188.93, 74.76, 253.45, 115.18]),
+  line("REPUBLIC OFTHE PHILIPPINES", [387.4, 116.44, 1340.08, 175.15]),
+  line("Unified Multi-Purpose ID", [583.71, 173.64, 1143.79, 233.28]),
+  line("CRN-0028-1215160-9", [1028.66, 296.88, 1658.73, 372.48]),
+  line("SURNAME", [744.05, 416.36, 889.08, 454.73]),
+  line("SANTOS", [744.21, 455.03, 925.21, 505.92]),
+  line("GIVEN NAME", [741.93, 518.75, 925.67, 557.74]),
+  line("JOSE", [743.11, 560.29, 877.31, 609.73]),
+  line("MIDDLE NAME", [740.13, 672.9, 943.76, 721.02]),
+  line("CRUZ", [741.98, 713.9, 869.47, 768.43]),
+  line("SEX M DATEOF BIRTH LAGOXOL/2B", [746.98, 765.58, 1397.88, 827.31]),
+  line("ADDRESS", [751.33, 823.5, 894.5, 861.83]),
+  line("2BPAYAPASTBAGONG DIWA", [750.47, 855.65, 1465.14, 914.05]),
+  line("STOCRISTOBALCALOOCAN CITY", [751.16, 915.03, 1549.73, 964.7]),
+  line("METROMANILA", [749.78, 966.82, 1126.5, 1015.61]),
+  line("PHILIPPINE S LBOO", [746.45, 1016.59, 1224.19, 1072.07]),
+];
+const umidResult = extractFields(umidLines, "UMID", "FRONT");
+
+console.log("\n=== Real UMID bug report ===\n");
+let umidPass = true;
+umidPass = check("last_name", umidResult.common_fields.last_name?.value, "SANTOS") && umidPass;
+umidPass = check("first_name", umidResult.common_fields.first_name?.value, "JOSE") && umidPass;
+umidPass = check("middle_name", umidResult.common_fields.middle_name?.value, "CRUZ") && umidPass;
+umidPass = check("sex", umidResult.common_fields.sex?.value, "M") && umidPass;
+umidPass = check("date_of_birth", umidResult.common_fields.date_of_birth?.value, undefined) && umidPass;
+umidPass = check("id_number", umidResult.variant_fields.id_number?.value, "0028-1215160-9") && umidPass;
+
+console.log(`\n${umidPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!umidPass) {
+  console.log("\nFull output:", JSON.stringify(umidResult, null, 2));
+}
+
+allPass = allPass && umidPass;
 process.exit(allPass ? 0 : 1);

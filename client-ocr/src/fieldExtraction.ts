@@ -682,6 +682,36 @@ function splitFusedDobSex(common: Record<string, OcrField | undefined>): void {
   }
 }
 
+// A real UMID bug report had "Sex"/"Date of Birth" fused onto one line with no space
+// at all between either label and its value ("SEX M DATEOF BIRTH LAGOXOL/2B") - the
+// regular per-field search does match "sex" as this line's own label (it's the exact
+// start of the line), but the leftover remainder is the *entire rest of the line*,
+// which fails sex's own value-shape validator (only a bare M/F, not a trailing
+// sentence) and gets discarded outright rather than pulling just the "M" out of it.
+// This scans for that specific fused shape directly and recovers just the M/F token -
+// the date_of_birth capture group afterward still has to pass DATE_VALUE_PATTERN to
+// be trusted (see below): in the real report, the recognizer misread that value as
+// "LAGOXOL/2B" - not a garbled-but-recoverable date, just wrong characters entirely -
+// so it's correctly left unresolved rather than accepting recognition garbage as a
+// birthdate.
+const SEX_DOB_FUSED_PATTERN = /\bsex\b\s*(m|f|male|female)\s+date\s*of\s*birth\b[:.\s]*(.*)$/i;
+
+function splitFusedSexDob(lines: RecognizedTextLine[], common: Record<string, OcrField | undefined>, side: DocumentSide): void {
+  if (common.sex?.value && common.date_of_birth?.value) return;
+  for (const l of lines) {
+    const match = SEX_DOB_FUSED_PATTERN.exec(l.text);
+    if (!match) continue;
+    if (!common.sex?.value) {
+      common.sex = toOcrField(match[1].toUpperCase(), l.confidence, l.boundingBox, side);
+    }
+    const rest = match[2].trim();
+    if (!common.date_of_birth?.value && rest && DATE_VALUE_PATTERN.test(rest)) {
+      common.date_of_birth = toOcrField(rest, l.confidence, l.boundingBox, side);
+    }
+    return;
+  }
+}
+
 /**
  * Some ID layouts (e.g. PWD) print one undivided "NAME" field instead of separate
  * label(s) - resolved here as a deliberately deferred, last-resort step, called only
@@ -902,6 +932,7 @@ export function extractFields(
   splitCommaSeparatedName(commonTarget);
   splitUndividedName(commonTarget);
   splitFusedDobSex(commonTarget);
+  splitFusedSexDob(lines, commonTarget, side);
 
   return { common_fields: common, variant_fields: variant };
 }

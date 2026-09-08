@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.16.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.17.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -225,7 +225,23 @@ downloads of the model assets from a public GCS bucket.
   `sex` from one fused line with no label for either and no space around the separating
   "-" (`"JANUARY 01,2022-MALE"`), via a new `splitFusedDobSex` step in the same spirit as
   `splitCompoundIdExpiry` above.
-  Still unvalidated: UMID/PRC/POSTAL/VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any
+  Still unvalidated (at the time): UMID/PRC/POSTAL/VOTERS/SSS/SENIOR_CITIZEN, and the
+  BACK side of any type.
+- **Tested against a real UMID FRONT photo.** `SEX`/`DATE OF BIRTH` printed fused onto
+  one line with no space at all between either label and its value
+  (`"SEX M DATEOF BIRTH LAGOXOL/2B"`). `sex` does match its own "sex" alias as this
+  line's label (it's the exact start of the line) - but the leftover remainder is the
+  *entire rest of the line*, which fails sex's own value-shape validator (only a bare
+  M/F, not a trailing sentence) and gets discarded outright rather than pulling just the
+  "M" out of it. Added `splitFusedSexDob`, a pattern-based recovery for this exact fused
+  shape (same approach as `splitCompoundIdExpiry`/`splitFusedDobSex` above), which
+  correctly recovers `sex` = "M". `date_of_birth`, on the same line, is a different kind
+  of problem: the recognizer misread its actual printed value as `"LAGOXOL/2B"` - not a
+  garbled-but-recoverable date, just wrong characters entirely. No amount of pattern
+  matching can reconstruct text the model never read correctly, so this is correctly
+  left unresolved rather than accepting recognition garbage as a birthdate - a real
+  limit of this recognition pass on this specific photo, not an extraction-logic bug.
+  Still unvalidated: PRC/POSTAL/VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any
   type.
 
 ## Run the field-extraction regression test
@@ -235,7 +251,7 @@ npm install
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with fifteen scenarios, each
+Pure logic test (no model, no browser, no network) with sixteen scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -330,6 +346,14 @@ reproducing a real bug report:
     it can't affect any other type. Also covers recovering `date_of_birth`/`sex` from
     one fused line with no label for either and no space around the separating "-"
     (`"JANUARY 01,2022-MALE"`).
+16. A real UMID photo: `SEX`/`DATE OF BIRTH` fused onto one line with no space between
+    either label and its value (`"SEX M DATEOF BIRTH LAGOXOL/2B"`) - `sex` does match
+    its own alias as the line's label, but the leftover remainder is the entire rest of
+    the line, which fails the value-shape validator and gets discarded rather than
+    pulling just "M" out of it. `date_of_birth`'s actual value was misread by the
+    recognizer as `"LAGOXOL/2B"` - not a garbled-but-recoverable date, just wrong
+    characters - so this scenario also asserts it's correctly left *unresolved*, not
+    guessed at.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show
