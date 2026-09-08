@@ -515,6 +515,146 @@ function resolveGridRows(
   }
 }
 
+// PH IDs print a suffix ("JR", "SR", "II", "III", "IV") as its own separate word when
+// present at all - checked so a real 4th value box in a merged name-label row (see
+// resolveMergedNameLabelRow below) is recognized as name_extension rather than folded
+// into last_name.
+const NAME_SUFFIX_PATTERN = /^(jr\.?|sr\.?|ii|iii|iv|v)$/i;
+
+/**
+ * Some ID layouts (e.g. Postal ID) print ONE combined label covering every name field
+ * at once ("First Name, Middle Name, Surname, Suffix" - OCR'd here as "...Sumame,
+ * Suffix") with the actual values printed as several separate boxes in a row below it,
+ * one word per box - not resolveGridRows's shape (2+ *separate* labels each paired
+ * with one value) and not one comma-joined line either (splitCommaSeparatedName's
+ * shape). The regular per-field search only ever looks for one nearby value per label:
+ * whichever name field's alias happens to match this merged line first (first_name
+ * here, since "first name" is the first alias text within it) claims the single
+ * nearest box and stops there - a real bug report had first_name resolve to "JUANA"
+ * (correctly, if only by luck of being leftmost) while last_name/middle_name stayed
+ * completely unresolved, with "REYES"/"DELA"/"CRUZ" never even looked at.
+ *
+ * Runs before the regular per-field pass (like resolveGridRows) so it can claim the
+ * whole row at once instead of losing it to the first single-value match: finds a
+ * label-only hit for any name field, then the nearest row of 2+ unused boxes below/
+ * right of it, and assigns them by the column order the label itself declares - first
+ * box is first_name, second is middle_name, the rest are last_name (PH surnames
+ * routinely being 2+ words, e.g. "DELA CRUZ") unless the last box is a recognized
+ * suffix token, which becomes name_extension instead. This is a real column order
+ * from the label, not a guess the way splitUndividedName's surname-prefix heuristic
+ * is - the layout is what puts "JUANA" before "REYES" before "DELA CRUZ", not this
+ * function.
+ */
+function resolveMergedNameLabelRow(
+  lines: RecognizedTextLine[],
+  used: Set<number>,
+  common: Record<string, OcrField | undefined>,
+  allAliasLists: string[][],
+  side: DocumentSide
+): void {
+  if (common.first_name || common.last_name) return;
+
+  const nameFieldGroups: { field: string; aliases: string[] }[] = [
+    { field: "first_name", aliases: COMMON_FIELD_ALIASES.first_name },
+    { field: "last_name", aliases: COMMON_FIELD_ALIASES.last_name },
+    { field: "middle_name", aliases: COMMON_FIELD_ALIASES.middle_name },
+    { field: "name_extension", aliases: COMMON_FIELD_ALIASES.name_extension },
+  ];
+
+  // A label is only "merged" (spans 2+ name fields, like "First Name, Middle Name,
+  // Surname, Suffix") when its primary field's alias - matched as an exact prefix, the
+  // same rule matchLabel itself trusts a remainder from - leaves a remainder that is
+  // ITSELF a prefix match for a *different* field's alias. Checking only "does this
+  // line match some name field's alias with an empty remainder" (an earlier version of
+  // this function) isn't enough on its own: an ordinary bilingual single-field label
+  // like "Gitnang Apelyido/Middle Name" (Filipino "Gitnang Apelyido" + English
+  // "Middle Name", both middle_name's own synonyms) also produces an empty remainder
+  // the same way - isKnownLabelText's whole job is recognizing that kind of same-field
+  // repetition as still just a label. Without checking that the second match is a
+  // genuinely different field, this wrongly treated PhilSys's ordinary middle_name
+  // label as a merged row and went hunting for other unrelated boxes below it.
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    const norm = normalize(lines[i].text);
+    let isMergedLabel = false;
+    for (const { field, aliases } of nameFieldGroups) {
+      for (const alias of aliases) {
+        const { matched, matchedLength, exact } = fuzzyMatchPrefix(norm, normalize(alias));
+        if (!matched || !exact || matchedLength >= norm.length) continue;
+        const remainder = lines[i].text.slice(matchedLength).replace(/^[\s:./|\\-]+/, "").trim();
+        if (!remainder) continue;
+        const remNorm = normalize(remainder);
+        const matchesOtherField = nameFieldGroups.some(
+          (other) => other.field !== field && other.aliases.some((oa) => fuzzyMatchPrefix(remNorm, normalize(oa)).matched)
+        );
+        if (matchesOtherField) {
+          isMergedLabel = true;
+          break;
+        }
+      }
+      if (isMergedLabel) break;
+    }
+    if (!isMergedLabel) continue;
+
+    const labelLine = lines[i];
+    const labelBottom = labelLine.boundingBox[3];
+    const labelHeight = labelLine.boundingBox[3] - labelLine.boundingBox[1];
+
+    const rowIndices: number[] = [];
+    for (let j = 0; j < lines.length; j++) {
+      if (used.has(j) || j === i) continue;
+      const top = lines[j].boundingBox[1];
+      if (top > labelBottom - 2 && top < labelBottom + labelHeight * 3 && !isLabelOnlyText(lines[j].text, allAliasLists)) {
+        rowIndices.push(j);
+      }
+    }
+    if (rowIndices.length < 2) continue; // not this shape - leave it for the regular per-field search
+
+    const rows = clusterIntoRows(lines, rowIndices);
+    const row = rows[0];
+    if (!row || row.length < 2) continue;
+
+    const words = row.map((idx) => ({ idx, text: lines[idx].text.trim() }));
+    let suffix: { idx: number; text: string } | undefined;
+    if (words.length >= 3 && NAME_SUFFIX_PATTERN.test(words[words.length - 1].text)) {
+      suffix = words.pop();
+    }
+
+    const [firstWord, ...rest] = words;
+    if (rest.length === 0) continue; // need at least first + one more to be worth claiming here
+
+    common.first_name = toOcrField(firstWord.text, lines[firstWord.idx].confidence, lines[firstWord.idx].boundingBox, side);
+    used.add(firstWord.idx);
+
+    if (rest.length === 1) {
+      common.last_name = toOcrField(rest[0].text, lines[rest[0].idx].confidence, lines[rest[0].idx].boundingBox, side);
+      used.add(rest[0].idx);
+    } else {
+      const middle = rest[0];
+      const surnameWords = rest.slice(1);
+      common.middle_name = toOcrField(middle.text, lines[middle.idx].confidence, lines[middle.idx].boundingBox, side);
+      used.add(middle.idx);
+
+      const surnameText = surnameWords.map((w) => w.text).join(" ");
+      const surnameBox: [number, number, number, number] = [
+        Math.min(...surnameWords.map((w) => lines[w.idx].boundingBox[0])),
+        Math.min(...surnameWords.map((w) => lines[w.idx].boundingBox[1])),
+        Math.max(...surnameWords.map((w) => lines[w.idx].boundingBox[2])),
+        Math.max(...surnameWords.map((w) => lines[w.idx].boundingBox[3])),
+      ];
+      common.last_name = toOcrField(surnameText, lines[surnameWords[0].idx].confidence, surnameBox, side);
+      surnameWords.forEach((w) => used.add(w.idx));
+    }
+
+    if (suffix) {
+      common.name_extension = toOcrField(suffix.text, lines[suffix.idx].confidence, lines[suffix.idx].boundingBox, side);
+      used.add(suffix.idx);
+    }
+    used.add(i);
+    return;
+  }
+}
+
 // How far outside a template region's own box (as a fraction of that box's width/height)
 // a candidate line's center may still fall and count as a match. Covers minor scale/
 // registration drift between the reference specimen and a real scanned card without this
@@ -884,9 +1024,10 @@ export function extractFields(
 
   resolveFromTemplate(lines, used, fieldTargets, idType, side, imageSize);
   resolveGridRows(lines, used, fieldTargets, side, allAliasLists);
+  resolveMergedNameLabelRow(lines, used, commonTarget, allAliasLists, side);
 
   function assign(target: Record<string, OcrField | undefined>, field: string, aliases: string[]) {
-    if (target[field]) return; // already resolved by resolveGridRows
+    if (target[field]) return; // already resolved by resolveGridRows or resolveMergedNameLabelRow
     const validator = FIELD_VALUE_VALIDATORS[field];
     const isAcceptableValue = (l: RecognizedTextLine) =>
       !isLabelOnlyText(l.text, allAliasLists) && (!validator || validator(l.text));

@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.17.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.18.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -241,8 +241,31 @@ downloads of the model assets from a public GCS bucket.
   matching can reconstruct text the model never read correctly, so this is correctly
   left unresolved rather than accepting recognition garbage as a birthdate - a real
   limit of this recognition pass on this specific photo, not an extraction-logic bug.
-  Still unvalidated: PRC/POSTAL/VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any
-  type.
+  Still unvalidated (at the time): PRC/POSTAL/VOTERS/SSS/SENIOR_CITIZEN, and the BACK
+  side of any type.
+- **Tested against a real Postal ID FRONT photo.** A new shape: ONE combined label
+  covering every name field at once (`"First Name, Middle Name, Sumame, Suffix"` -
+  "Sumame" is OCR-garbled "Surname"), with the actual values printed as four separate
+  boxes in a row below it - not `resolveGridRows`'s shape (2+ *separate* labels each
+  paired with one value) and not one comma-joined line either
+  (`splitCommaSeparatedName`'s shape). `first_name`'s own alias matched the merged line
+  as its label (first among the merged fields), so the regular per-field search grabbed
+  only the single nearest box ("JUANA") and stopped there - `last_name`/`middle_name`
+  never resolved at all, with "REYES"/"DELA"/"CRUZ" never even looked at.
+  Added `resolveMergedNameLabelRow`, which detects a label whose primary field-alias
+  match leaves a remainder that's itself a *different* field's alias (the real
+  distinguishing signal - see its doc comment for why "matches some name field's alias
+  with an empty remainder" alone isn't enough, and the regression that taught me that:
+  it also fired on PhilSys's ordinary bilingual `"Gitnang Apelyido/Middle Name"` label,
+  both halves being middle_name's own synonyms, sending it hunting for unrelated boxes
+  elsewhere on the card and replacing already-correct `first_name`/`last_name` with
+  garbage - caught by the existing PhilSys regression scenario before it ever reached
+  this repo's history). Once detected, claims the row by the label's own declared
+  column order: first box is `first_name`, second is `middle_name`, the rest are
+  `last_name` (PH surnames routinely being 2+ words, e.g. "DELA CRUZ") unless the last
+  box is a recognized suffix token ("JR"/"SR"/"II"/"III"/"IV"), which becomes
+  `name_extension` instead.
+  Still unvalidated: PRC/VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any type.
 
 ## Run the field-extraction regression test
 
@@ -251,7 +274,7 @@ npm install
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with sixteen scenarios, each
+Pure logic test (no model, no browser, no network) with seventeen scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -354,6 +377,16 @@ reproducing a real bug report:
     recognizer as `"LAGOXOL/2B"` - not a garbled-but-recoverable date, just wrong
     characters - so this scenario also asserts it's correctly left *unresolved*, not
     guessed at.
+17. A real Postal ID photo: ONE combined label covering every name field at once
+    (`"First Name, Middle Name, Sumame, Suffix"`), with the values printed as four
+    separate boxes in a row below it, not one label per field and not one comma-joined
+    line either. `first_name`'s own alias matched the whole merged line as its label,
+    so the regular search grabbed only the single nearest box and stopped -
+    `last_name`/`middle_name` never resolved. Also guards the regression this fix's
+    first version caused: an over-broad trigger also fired on an ordinary bilingual
+    single-field label (PhilSys's `"Gitnang Apelyido/Middle Name"`), wrongly replacing
+    already-correct fields elsewhere on a *different* real card - caught by the
+    existing PhilSys scenario before it ever reached this repo's history.
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

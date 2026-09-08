@@ -713,4 +713,60 @@ if (!umidPass) {
 }
 
 allPass = allPass && umidPass;
+
+// --- Real Postal ID bug report: ONE combined label covering every name field at once
+// ("First Name, Middle Name, Sumame, Suffix" - "Sumame" is OCR-garbled "Surname"),
+// with the actual values printed as four separate boxes in a row below it - not
+// resolveGridRows's shape (2+ *separate* labels each paired with one value) and not
+// one comma-joined line either (splitCommaSeparatedName's shape). Before the fix,
+// first_name's own alias matched this merged line as its label (first among the
+// merged fields) and the regular per-field search grabbed only the single nearest box
+// ("JUANA"), leaving last_name/middle_name completely unresolved with
+// "REYES"/"DELA"/"CRUZ" never even looked at.
+//
+// Also guards the regression this fix's first version caused: an over-broad "does
+// this line match some name field's alias with an empty remainder" trigger also fired
+// on PhilSys's ordinary bilingual middle_name label ("Gitnang Apelyido/Middle Name" -
+// both halves are middle_name's own synonyms, not a different field), sending it
+// hunting for unrelated boxes elsewhere on the card and replacing already-correct
+// first_name/last_name with garbage. The real PhilSys regression scenario above
+// already covers that the fix holds; this scenario is the new bug this same session
+// found the fix for.
+const postalLines = [
+  line("REPUBLIC OF THE PHILIPPINES", [251.43, 31.67, 642.32, 57.23]),
+  line("Philippine", [250.46, 58.42, 385.41, 85.71]),
+  line("Postal Corporation", [388.22, 59.74, 644.21, 85.29]),
+  line("PHLPOST&", [715.26, 55.67, 1059.59, 107.15]),
+  line("POSTAL IDENTITY CARD", [249.47, 87.43, 645.43, 115.78]),
+  line("First Name, Middle Name, Sumame, Suffix", [334.72, 200.32, 591.12, 220.69]),
+  line("JUANA", [333.99, 224.55, 456.64, 259.23]),
+  line("REYES", [468.67, 226.32, 594.67, 258.61]),
+  line("DELA", [614.5, 224.33, 712.37, 260.6]),
+  line("CRUZ", [731.38, 222.02, 834.98, 267.53]),
+  line("Address", [330.56, 268.97, 392.5, 288.03]),
+  line("5GEN. TUAZON", [329.95, 287.43, 624.5, 320.31]),
+  line("BLVD.", [628.36, 287.94, 721.43, 319.38]),
+  line("BRGY", [328.85, 320.97, 415.95, 349.85]),
+  line("RIVERA", [438.31, 319.66, 558.52, 351.26]),
+  line("1742", [327.78, 351.08, 410.13, 379.79]),
+  line("PASAY CITY", [422.31, 350.07, 614.64, 380.7]),
+  line("Dateof Birth", [470.13, 422.93, 549.66, 441.87]),
+  line("Natonality", [637.04, 425.99, 702.37, 442.99]),
+  line("Issuing Post Office", [470.69, 492.76, 583.48, 509.43]),
+  line("Valid Until", [637.11, 491.88, 698.94, 508.0]),
+];
+const postalResult = extractFields(postalLines, "POSTAL", "FRONT");
+
+console.log("\n=== Real Postal ID bug report ===\n");
+let postalPass = true;
+postalPass = check("first_name", postalResult.common_fields.first_name?.value, "JUANA") && postalPass;
+postalPass = check("middle_name", postalResult.common_fields.middle_name?.value, "REYES") && postalPass;
+postalPass = check("last_name", postalResult.common_fields.last_name?.value, "DELA CRUZ") && postalPass;
+
+console.log(`\n${postalPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!postalPass) {
+  console.log("\nFull output:", JSON.stringify(postalResult, null, 2));
+}
+
+allPass = allPass && postalPass;
 process.exit(allPass ? 0 : 1);
