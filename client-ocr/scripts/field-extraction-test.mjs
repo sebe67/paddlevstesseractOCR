@@ -623,4 +623,49 @@ if (!philsysPass) {
 }
 
 allPass = allPass && philsysPass;
+
+// --- Real PhilHealth ID bug report: this layout prints NO labels at all next to
+// last_name/date_of_birth/sex/address - just the raw values stacked one below another
+// (id_number, full name, date_of_birth+sex fused onto one line, then address), with
+// nothing for label-proximity matching to search for. id_number itself still resolves
+// (its alias list fuzzy-matches the "PhilHealth" logo text well enough - see
+// "SPhilHealth" below), so resolvePhilhealthUnlabeledFields uses the card's fixed
+// print order below it as the anchor instead. Gated to only run for PHILHEALTH, so it
+// can't change what any other id_type resolves to. Also covers splitFusedDobSex
+// recovering date_of_birth/sex from "JANUARY 01,2022-MALE", one fused line with no
+// label for either and no space around the separating "-".
+const philhealthLines = [
+  line("REPUBLIC OF THE PHILIPPINES", [72.28, 18.87, 260.22, 31.52]),
+  line("SPhilHealth", [429.23, 16.96, 526.46, 36.51]),
+  line("Philippine Health Insurance Corporation", [71.04, 34.0, 250.77, 44.15]),
+  line("17-13245678-0", [224.13, 95.2, 401.99, 118.81]),
+  line("DELA CRUZ, JUAN", [224.29, 124.13, 358.07, 139.14]),
+  line("JANUARY 01,2022-MALE", [223.32, 140.58, 360.02, 155.6]),
+  line("PRK. SUBDIVISION, BARANGAY", [223.96, 156.69, 391.46, 169.32]),
+  line("CITY HERE", [224.17, 170.28, 282.36, 182.47]),
+  line("SignUiure", [105.02, 319.86, 157.48, 334.21]),
+  line("1324567", [291.08, 315.1, 420.59, 327.66]),
+  line("8.0", [430.62, 315.64, 458.97, 327.12]),
+  line("FORMALECONOMY", [230.1, 330.81, 385.32, 345.88]),
+];
+const philhealthResult = extractFields(philhealthLines, "PHILHEALTH", "FRONT");
+
+console.log("\n=== Real PhilHealth ID bug report ===\n");
+let philhealthPass = true;
+philhealthPass = check("last_name", philhealthResult.common_fields.last_name?.value, "DELA CRUZ") && philhealthPass;
+philhealthPass = check("first_name", philhealthResult.common_fields.first_name?.value, "JUAN") && philhealthPass;
+philhealthPass =
+  check("date_of_birth", philhealthResult.common_fields.date_of_birth?.value, "JANUARY 01,2022") && philhealthPass;
+philhealthPass = check("sex", philhealthResult.common_fields.sex?.value, "MALE") && philhealthPass;
+philhealthPass =
+  check("address", philhealthResult.common_fields.address?.value, "PRK. SUBDIVISION, BARANGAY CITY HERE") &&
+  philhealthPass;
+philhealthPass = check("id_number", philhealthResult.variant_fields.id_number?.value, "17-13245678-0") && philhealthPass;
+
+console.log(`\n${philhealthPass ? "ALL PASSED" : "SOME FAILED"}`);
+if (!philhealthPass) {
+  console.log("\nFull output:", JSON.stringify(philhealthResult, null, 2));
+}
+
+allPass = allPass && philhealthPass;
 process.exit(allPass ? 0 : 1);

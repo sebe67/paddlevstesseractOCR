@@ -1,6 +1,6 @@
 # id-ocr-web
 
-**Version: 1.15.0** (`package.json`'s `version`, also shown in the demo page's header
+**Version: 1.16.0** (`package.json`'s `version`, also shown in the demo page's header
 and folded into every result's `document_provenance[].engine_version`) — bumped on every
 push with a meaningful field-extraction change, so a bug report or a screenshot of the
 demo can be tied to the exact code that produced it. `src/version.ts` is the source of
@@ -208,8 +208,25 @@ downloads of the model assets from a public GCS bucket.
   comma before the year), didn't match `DATE_VALUE_PATTERN`'s existing shapes — it only
   covered numeric dates and *day*-first month-name dates, not month-first. Fixed by
   adding a month-first alternative to the pattern.
-  Still unvalidated: UMID/PRC/POSTAL/VOTERS/SSS/PHILHEALTH/SENIOR_CITIZEN, and the BACK
-  side of any type.
+  Still unvalidated (at the time): UMID/PRC/POSTAL/VOTERS/SSS/PHILHEALTH/SENIOR_CITIZEN,
+  and the BACK side of any type.
+- **Tested against a real PHILHEALTH ID FRONT photo.** A structurally different problem
+  from every type before it: this layout prints **no labels at all** next to
+  `last_name`/`date_of_birth`/`sex`/`address` — just the raw values stacked one below
+  another, nothing for label-proximity matching to search for. (`id_number` was the one
+  exception, and it already worked — its alias list happens to fuzzy-match the
+  "PhilHealth" logo text closely enough to anchor off, confirmed by testing without that
+  logo line present, which does break it. Left alone since it already produces the
+  correct value; noted here as a known fragility, not something fixed.) Added
+  `resolvePhilhealthUnlabeledFields`, which uses the fixed print order below `id_number`
+  (name, then date_of_birth+sex, then address) as the anchor instead of a label or a
+  pixel-position template — deliberately gated to only run when `idType === "PHILHEALTH"`,
+  so it can't affect what any other type resolves to. Also recovers `date_of_birth` and
+  `sex` from one fused line with no label for either and no space around the separating
+  "-" (`"JANUARY 01,2022-MALE"`), via a new `splitFusedDobSex` step in the same spirit as
+  `splitCompoundIdExpiry` above.
+  Still unvalidated: UMID/PRC/POSTAL/VOTERS/SSS/SENIOR_CITIZEN, and the BACK side of any
+  type.
 
 ## Run the field-extraction regression test
 
@@ -218,7 +235,7 @@ npm install
 npm run test:field-extraction
 ```
 
-Pure logic test (no model, no browser, no network) with fourteen scenarios, each
+Pure logic test (no model, no browser, no network) with fifteen scenarios, each
 reproducing a real bug report:
 
 1. Several short field labels printed in a row with a matching value row below (e.g.
@@ -303,6 +320,16 @@ reproducing a real bug report:
     name immediately followed by day with no space, comma before the year), didn't
     match any of the date-shape validator's existing patterns - all day-first or purely
     numeric, none month-first.
+15. A real PhilHealth ID photo, a structurally different problem from every type
+    before it: this layout prints no labels at all next to `last_name`/
+    `date_of_birth`/`sex`/`address`, just the raw values stacked one below another -
+    nothing for label-proximity matching to search for. `id_number` was the one
+    exception (its alias list fuzzy-matches the "PhilHealth" logo text closely enough
+    to anchor off), so the fixed print order below it - name, then date_of_birth+sex,
+    then address - is used as the anchor instead, gated to only run for PHILHEALTH so
+    it can't affect any other type. Also covers recovering `date_of_birth`/`sex` from
+    one fused line with no label for either and no space around the separating "-"
+    (`"JANUARY 01,2022-MALE"`).
 
 Fast to re-run any time `fieldExtraction.ts` or `idTemplates.ts` changes — worth running
 before trusting a change to the field-matching logic, since this kind of bug doesn't show

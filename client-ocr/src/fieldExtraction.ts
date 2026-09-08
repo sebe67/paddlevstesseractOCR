@@ -605,6 +605,84 @@ function splitCompoundIdExpiry(lines: RecognizedTextLine[], variant: Record<stri
 }
 
 /**
+ * PhilHealth's FRONT layout prints no label at all next to last_name/date_of_birth/
+ * sex/address - just the raw values stacked one below another (id_number, then the
+ * full name, then date_of_birth+sex fused onto one line, then the address) with
+ * nothing for label-proximity matching to search for. id_number itself still resolves
+ * reliably (its own alias list fuzzy-matches the "PhilHealth" logo text well enough),
+ * so this uses the fixed print order below it as the anchor instead of a label or a
+ * pixel-position template: the real card layout is a fixed form, so that order is
+ * consistent across cards of this type the same way position is - it just doesn't
+ * need us to know the source image's actual pixel dimensions to use, the way a
+ * position template (idTemplates.ts) would.
+ *
+ * Deliberately gated to only run for PHILHEALTH by its caller - this is that one
+ * type's specific print order, not a general "no labels found" fallback, so it can't
+ * change what any other id_type resolves to.
+ */
+function resolvePhilhealthUnlabeledFields(
+  lines: RecognizedTextLine[],
+  used: Set<number>,
+  common: Record<string, OcrField | undefined>,
+  variant: Record<string, OcrField | undefined>,
+  allAliasLists: string[][],
+  side: DocumentSide
+): void {
+  if (common.last_name || !variant.id_number?.bounding_box) return;
+
+  const anchor = variant.id_number.bounding_box;
+  const anchorHeight = anchor[3] - anchor[1];
+
+  const candidates = lines
+    .map((l, i) => ({ l, i }))
+    .filter(
+      ({ l, i }) =>
+        !used.has(i) &&
+        l.boundingBox[1] > anchor[3] - 2 &&
+        Math.abs(l.boundingBox[0] - anchor[0]) < anchorHeight * 5 &&
+        !isLabelOnlyText(l.text, allAliasLists)
+    )
+    .sort((a, b) => a.l.boundingBox[1] - b.l.boundingBox[1]);
+
+  const [nameCand, dobSexCand, addressCand] = candidates;
+  if (!nameCand) return;
+
+  common.last_name = toOcrField(nameCand.l.text, nameCand.l.confidence, nameCand.l.boundingBox, side);
+  used.add(nameCand.i);
+
+  if (dobSexCand && DOB_SEX_PATTERN.test(dobSexCand.l.text.trim())) {
+    common.date_of_birth = toOcrField(dobSexCand.l.text, dobSexCand.l.confidence, dobSexCand.l.boundingBox, side);
+    used.add(dobSexCand.i);
+  }
+
+  if (addressCand && !common.address) {
+    const extended = extendMultilineValue(addressCand.l, addressCand.i, lines, used, allAliasLists);
+    extended.indices.forEach((idx) => used.add(idx));
+    common.address = toOcrField(extended.text, addressCand.l.confidence, extended.box, side);
+  }
+}
+
+// PhilHealth prints date_of_birth and sex fused onto one line with no label for
+// either and no space around the separating "-" ("JANUARY 01,2022-MALE") - recovered
+// by pattern-matching the fused shape directly, the same approach
+// splitCompoundIdExpiry above takes for a different fused pair. Harmless to check
+// unconditionally for every id_type: no other type's date_of_birth value can end up
+// looking like "<date>-MALE/FEMALE/M/F" in the first place, since that shape would
+// have already failed DATE_VALUE_PATTERN's own validator during normal resolution.
+const DOB_SEX_PATTERN = /^(.*\d{4})-\s*(male|female|m|f)\s*$/i;
+
+function splitFusedDobSex(common: Record<string, OcrField | undefined>): void {
+  const current = common.date_of_birth;
+  if (!current) return;
+  const match = DOB_SEX_PATTERN.exec(current.value.trim());
+  if (!match) return;
+  common.date_of_birth = { ...current, value: match[1].trim() };
+  if (!common.sex?.value) {
+    common.sex = { ...current, value: match[2].toUpperCase() };
+  }
+}
+
+/**
  * Some ID layouts (e.g. PWD) print one undivided "NAME" field instead of separate
  * label(s) - resolved here as a deliberately deferred, last-resort step, called only
  * after every other field's own resolution pass has already run and claimed its value,
@@ -817,9 +895,13 @@ export function extractFields(
   if (applicableVariantFields.includes("id_number") && applicableVariantFields.includes("expiry_date")) {
     splitCompoundIdExpiry(lines, variantTarget, side);
   }
+  if (idType === "PHILHEALTH") {
+    resolvePhilhealthUnlabeledFields(lines, used, commonTarget, variantTarget, allAliasLists, side);
+  }
   resolveStandaloneNameLabel(lines, used, commonTarget, allAliasLists, side);
   splitCommaSeparatedName(commonTarget);
   splitUndividedName(commonTarget);
+  splitFusedDobSex(commonTarget);
 
   return { common_fields: common, variant_fields: variant };
 }
